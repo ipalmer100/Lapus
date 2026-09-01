@@ -1,0 +1,2 @@
+[console_scripts]
+lapus-desktop = lapus.desktop:main

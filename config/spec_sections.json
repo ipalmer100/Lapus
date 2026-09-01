@@ -1,0 +1,101 @@
+[
+  {
+    "number": 1,
+    "key": "product_description",
+    "label": "Product Description",
+    "table": "t01_product_description",
+    "layout": "form",
+    "primary_key": "document_id",
+    "editable_fields": ["customer", "spec_number", "item", "date_of_issue", "structure_description", "revision_number", "structure_code"]
+  },
+  {
+    "number": 2,
+    "key": "locations",
+    "label": "Locations",
+    "table": "t02_locations",
+    "layout": "form",
+    "primary_key": "document_id",
+    "editable_fields": ["customer_location", "facility", "spec_originator", "phone_number"]
+  },
+  {
+    "number": 3,
+    "key": "bill_of_materials",
+    "label": "Bill of Materials",
+    "table": "t03_bill_of_materials",
+    "layout": "table",
+    "primary_key": "id",
+    "editable_fields": ["basis_weight", "basis_weight_range", "caliper_mils", "raw_material", "supplier", "raw_material_item_code"]
+  },
+  {
+    "number": 4,
+    "key": "secondary_approved_materials",
+    "label": "Secondary Approved Materials",
+    "table": "t04_secondary_approved_materials",
+    "layout": "table",
+    "primary_key": "id",
+    "editable_fields": ["basis_weight", "basis_weight_range", "caliper_mils", "raw_material", "supplier", "raw_material_item_code"]
+  },
+  {
+    "number": 5,
+    "key": "process_routing",
+    "label": "Process Routing",
+    "table": "t05_process_routing",
+    "layout": "table",
+    "primary_key": "id",
+    "editable_fields": ["pass", "process", "machine", "process_conditions", "comments"]
+  },
+  {
+    "number": 6,
+    "key": "physical_attributes_testing",
+    "label": "Physical Attributes & Testing",
+    "table": "t06_physical_attributes_testing",
+    "layout": "quality_matrix",
+    "primary_key": "id",
+    "editable_fields": ["pass_name", "attribute", "coa", "units", "lsl", "lcl", "target", "ucl", "usl", "procedure", "frequency", "notes"]
+  },
+  {
+    "number": 7,
+    "key": "slitting_information",
+    "label": "Slitting Information",
+    "table": "t07_slitting_information",
+    "layout": "form",
+    "primary_key": "document_id",
+    "editable_fields": ["slit_width", "core_id", "splice_tape", "width_tolerance", "core_type", "splice_type", "cutoff", "lineal_ft_per_roll", "splice_location", "eyemark_location", "maximum_od", "splice_stamp_flag", "number_of_cuts", "maximum_weight", "maximum_splices", "unwind", "labels_across", "core_tags", "splice_code", "splicing", "end_of_roll_indicator", "comments"]
+  },
+  {
+    "number": 8,
+    "key": "packing_information",
+    "label": "Packing Information",
+    "table": "t08_packing_information",
+    "layout": "form",
+    "primary_key": "document_id",
+    "editable_fields": ["pallet_size", "poly_bags", "pallet_labels", "pallet_type", "core_plugs", "protective_corners", "rolls_per_layer", "roll_cradles", "stretch_wrap_pallet", "layers_per_pallet", "tier_dividers", "band_pallet", "rolls_per_pallet", "top_layer", "wooden_top", "feet_per_pallet", "end_boards", "packing_instructions", "additional_instructions"]
+  },
+  {
+    "number": 9,
+    "key": "reporting_requirements",
+    "label": "Reporting Requirements",
+    "table": "t09_reporting_requirements",
+    "layout": "form",
+    "primary_key": "document_id",
+    "editable_fields": ["coa_required", "coa_recipients", "coa_format", "coa_frequency", "values_to_report_on_coa"]
+  },
+  {
+    "number": 10,
+    "key": "customer_sampling_requirements",
+    "label": "Customer Sampling Requirements",
+    "table": "t10_customer_sampling_requirements",
+    "layout": "form",
+    "primary_key": "document_id",
+    "editable_fields": ["samples_required", "send_to", "number_of_samples", "sample_preparation_labeling"]
+  },
+  {
+    "number": 11,
+    "key": "revision_history",
+    "label": "Revision History",
+    "table": "t11_revision_history",
+    "layout": "timeline",
+    "primary_key": "id",
+    "editable_fields": []
+  }
+]

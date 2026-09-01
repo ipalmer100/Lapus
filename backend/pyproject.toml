@@ -1,0 +1,33 @@
+[project]
+name = "lapus"
+version = "0.1.0"
+description = "Database-backed specification management frontend for manufacturing product specifications."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "pydantic>=2.6.0",
+]
+
+[project.optional-dependencies]
+# Future database backends. Neither is imported unless LAPUS_DATABASE_URL
+# names that dialect, so a SQLite-only install stays dependency-free.
+postgres = ["psycopg[binary]>=3.1"]
+mssql = ["pyodbc>=5.0"]
+build = ["pyinstaller>=6.0"]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[tool.setuptools]
+packages = [
+    "lapus",
+    "lapus.db",
+    "lapus.repositories",
+    "lapus.services",
+    "lapus.api",
+]
+
+[project.scripts]
+lapus-desktop = "lapus.desktop:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,142 @@
+"""Creation of the Lapus-owned write model.
+
+Mirrors db/postgres/001_lapus_schema.sql, generated per dialect so the SQLite
+build and a future SQL Server build stay in step with the PostgreSQL contract
+rather than drifting into three hand-maintained scripts.
+
+These migrations only ever create objects inside the `lapus` schema. Nothing
+here touches, references-with-a-foreign-key, or otherwise constrains a
+parser-owned table -- on SQLite it *cannot*, since staging is attached
+read-only, and on PostgreSQL the FKs to t00_documents in the reference script
+are deliberately dropped: a parser rerun that deletes and reinserts documents
+must not be blocked (or cascaded) by application rows. Referential integrity
+against staging is checked in the service layer instead, where a missing
+document is a reportable state rather than a constraint violation.
+"""
+
+from __future__ import annotations
+
+from .dialect import Dialect
+from .engine import Database
+
+SCHEMA_VERSION = 1
+
+
+def _statements(dialect: Dialect) -> list[str]:
+    pk = dialect.identity_pk
+    ts = dialect.timestamp_type
+    now = dialect.now_expression
+    exists = "IF NOT EXISTS " if dialect.supports_if_not_exists_ddl else ""
+    # SQLite rejects a schema-qualified REFERENCES target; PostgreSQL requires
+    # one. `fk_reference` phrases it per backend.
+    request_fk = dialect.fk_reference("change_request")
+
+    statements: list[str] = []
+    if dialect.creates_schema:
+        statements.append("CREATE SCHEMA IF NOT EXISTS lapus")
+
+    statements += [
+        f"""
+        CREATE TABLE {exists}lapus.schema_version (
+            version INTEGER NOT NULL,
+            applied_at {ts} NOT NULL DEFAULT {now}
+        )
+        """,
+        f"""
+        CREATE TABLE {exists}lapus.change_request (
+            request_id {pk},
+            document_id BIGINT NOT NULL,
+            title TEXT NOT NULL,
+            reason TEXT,
+            status TEXT NOT NULL DEFAULT 'DRAFT'
+                CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','REJECTED','CANCELLED')),
+            created_by TEXT NOT NULL,
+            created_at {ts} NOT NULL DEFAULT {now},
+            updated_at {ts} NOT NULL DEFAULT {now},
+            submitted_by TEXT,
+            submitted_at {ts},
+            decided_by TEXT,
+            decided_at {ts},
+            decision_comment TEXT
+        )
+        """,
+        f"""
+        CREATE TABLE {exists}lapus.change_item (
+            item_id {pk},
+            request_id BIGINT NOT NULL
+                REFERENCES {request_fk}(request_id) ON DELETE CASCADE,
+            target_document_id BIGINT NOT NULL,
+            section_number INTEGER NOT NULL CHECK (section_number BETWEEN 1 AND 11),
+            target_table TEXT NOT NULL,
+            target_record_id BIGINT,
+            target_field TEXT NOT NULL,
+            original_value TEXT,
+            proposed_value TEXT,
+            -- Distinguishes "propose an empty value" from "no value proposed",
+            -- which a nullable proposed_value alone cannot express. See
+            -- PRODUCT_REQUIREMENTS.md: an intentional clear must be explicit.
+            clears_value INTEGER NOT NULL DEFAULT 0,
+            change_comment TEXT,
+            created_by TEXT NOT NULL,
+            created_at {ts} NOT NULL DEFAULT {now},
+            updated_at {ts} NOT NULL DEFAULT {now}
+        )
+        """,
+        f"""
+        CREATE TABLE {exists}lapus.change_event (
+            event_id {pk},
+            request_id BIGINT NOT NULL
+                REFERENCES {request_fk}(request_id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL,
+            from_status TEXT,
+            to_status TEXT,
+            event_comment TEXT,
+            actor TEXT NOT NULL,
+            created_at {ts} NOT NULL DEFAULT {now}
+        )
+        """,
+        dialect.create_index(
+            "ix_lapus_change_request_document", "change_request", "document_id"
+        ),
+        dialect.create_index(
+            "ix_lapus_change_request_status", "change_request", "status"
+        ),
+        dialect.create_index("ix_lapus_change_item_request", "change_item", "request_id"),
+        dialect.create_index(
+            "ix_lapus_change_item_target", "change_item",
+            "target_document_id, target_table, target_record_id, target_field",
+        ),
+        dialect.create_index(
+            "ix_lapus_change_event_request", "change_event", "request_id, created_at"
+        ),
+        # The uniqueness rule from the PostgreSQL contract -- one proposal per
+        # field per request -- as two partial indexes. target_record_id is NULL
+        # for one-row-per-document sections, and in SQL a NULL never equals a
+        # NULL, so a single UNIQUE constraint would silently permit duplicate
+        # proposals against exactly the single-record sections. Splitting on
+        # the NULL closes that gap on all three backends.
+        dialect.create_index(
+            "ux_lapus_change_item_row_target", "change_item",
+            "request_id, target_table, target_record_id, target_field",
+            unique=True, where="target_record_id IS NOT NULL",
+        ),
+        dialect.create_index(
+            "ux_lapus_change_item_doc_target", "change_item",
+            "request_id, target_table, target_field",
+            unique=True, where="target_record_id IS NULL",
+        ),
+    ]
+    return statements
+
+
+def apply_migrations(database: Database) -> None:
+    """Create the Lapus write model if it is not already there."""
+    with database.transaction():
+        for statement in _statements(database.dialect):
+            database.execute(statement)
+
+        current = database.scalar("SELECT MAX(version) FROM lapus.schema_version")
+        if current is None:
+            database.execute(
+                "INSERT INTO lapus.schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
+            )
