@@ -17,3 +17,6 @@ lapus.db
 packaging/dist/
 packaging/build/
 packaging/.build-venv/
+*.egg-info/
+.build-venv/
+.venv/
