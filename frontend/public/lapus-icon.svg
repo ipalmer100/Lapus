@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Lapus">
+  <rect width="64" height="64" rx="13" fill="#1d4ed8"/>
+  <!-- Layered sheets: the staged specification, with one layer lifted -
+       the overlay model the app is built around. -->
+  <path d="M14 40h28v6H14z" fill="#ffffff" opacity=".45"/>
+  <path d="M14 29h28v6H14z" fill="#ffffff" opacity=".7"/>
+  <path d="M18 16h28v6H18z" fill="#ffffff"/>
+</svg>

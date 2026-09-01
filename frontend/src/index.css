@@ -1,0 +1,33 @@
+:root {
+  color-scheme: light;
+  font: 14px/1.45 system-ui, "Segoe UI", Roboto, sans-serif;
+
+  --ink: #16202c;
+  --ink-soft: #5a6b7d;
+  --ink-faint: #93a2b1;
+  --rule: #dfe5ec;
+  --surface: #ffffff;
+  --canvas: #f4f6f9;
+  --accent: #1d4ed8;
+  --accent-soft: #eaf0ff;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --bad: #b91c1c;
+  --bad-soft: #fee2e2;
+  --ok: #15803d;
+  --ok-soft: #dcfce7;
+  --change: #6d28d9;
+  --change-soft: #f3e8ff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+#root { min-height: 100vh; }
+
+button { font: inherit; }
