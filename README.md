@@ -46,28 +46,60 @@ Node, no terminal. See [packaging/README.md](packaging/README.md).
 
 ### From source
 
-Prerequisites: Python 3.11+, Node.js 20+.
+Prerequisites: Python 3.11+, Node.js 20+, Git.
+
+**Windows (PowerShell)** — note that `cmd`-style `set VAR=value` and bash-style
+`a && b` do not work in Windows PowerShell 5.1; the equivalents are below.
+
+```powershell
+git clone https://github.com/ipalmer100/Lapus.git
+cd Lapus
+
+# 1. Backend. Go through python.exe rather than the pip.exe shim: the shim is
+#    a separate executable, and some managed Windows machines block running
+#    newly created .exe files out of a user profile.
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install -e "backend[dev,postgres]"
+
+# 2. A database to point at. Skip this if you have a real Spec_Stage.
+.venv\Scripts\python.exe tools\make_demo_db.py
+
+# 3. Frontend — one command per line, not chained with &&
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 4. Run
+$env:LAPUS_DATABASE_URL = "Spec_Stage.db"
+.venv\Scripts\python.exe -m lapus.desktop
+```
+
+For a PostgreSQL `Spec_Stage`, set instead:
+
+```powershell
+$env:LAPUS_DATABASE_URL = "postgresql://lapus_app:YOURPASSWORD@localhost:5432/Spec_Stage"
+```
+
+**macOS / Linux**
 
 ```bash
-# 1. Backend
-python3 -m venv .venv
-.venv/bin/pip install -e "backend[dev]"
+git clone https://github.com/ipalmer100/Lapus.git
+cd Lapus
 
-# 2. A database to point at.
-#    Either use the real Spec_Stage.db the parser produced, or generate a
-#    sample one with eighteen specifications:
+python3 -m venv .venv
+.venv/bin/pip install -e "backend[dev]"          # add ,postgres for PostgreSQL
 .venv/bin/python tools/make_demo_db.py
 
-# 3. Frontend
 cd frontend && npm install && npm run build && cd ..
 
-# 4. Run — serves the API and the built UI on one port
 LAPUS_DATABASE_URL=Spec_Stage.db .venv/bin/python -m lapus.desktop
 ```
 
-Then open http://127.0.0.1:8770/.
+Either way, open http://127.0.0.1:8770/.
 
-For frontend development with hot reload, run the two separately:
+For frontend development with hot reload, run the two halves separately:
 
 ```bash
 LAPUS_DATABASE_URL=Spec_Stage.db .venv/bin/python -m uvicorn lapus.api.app:app --port 8770 --reload

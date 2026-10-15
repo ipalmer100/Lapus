@@ -13,6 +13,24 @@ one of the others.
 The parser may use a different installed Python; Lapus does not need to share
 its virtual environment.
 
+### A note on Windows PowerShell
+
+The command blocks below are POSIX shell. On Windows PowerShell three things
+differ, and all three produce confusing errors rather than obvious ones:
+
+| POSIX | Windows PowerShell |
+| --- | --- |
+| `VAR=value command` | `$env:VAR = "value"` on its own line, then the command |
+| `a && b` | one command per line (`&&` is a parse error before PowerShell 7) |
+| `.venv/bin/pip` | `.venv\Scripts\python.exe -m pip` |
+
+Prefer `python.exe -m pip` over `pip.exe`. The latter is a separate shim
+executable, and a managed Windows machine may refuse to run a freshly created
+`.exe` from a user profile -- which surfaces as
+`Program 'pip.exe' failed to run: Access is denied`, not as a policy message.
+Going through the interpreter sidesteps the shim entirely. The same trick is
+why `packaging/build_windows_exe.bat` calls `python -m PyInstaller`.
+
 ---
 
 ## SQLite (the default)
