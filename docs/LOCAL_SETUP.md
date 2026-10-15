@@ -24,6 +24,21 @@ differ, and all three produce confusing errors rather than obvious ones:
 | `a && b` | one command per line (`&&` is a parse error before PowerShell 7) |
 | `.venv/bin/pip` | `.venv\Scripts\python.exe -m pip` |
 
+Use `npm.cmd` rather than `npm`. In PowerShell the bare name resolves to
+`npm.ps1`, and a machine left on the default execution policy refuses to load
+it:
+
+```text
+npm : File C:\Program Files\nodejs\npm.ps1 cannot be loaded because
+running scripts is disabled on this system.
+```
+
+`npm.cmd` is the batch wrapper that ships alongside it and is not subject to
+the script policy, so nothing needs changing machine-wide. If you would rather
+allow scripts for just the current window:
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` -- that lasts
+until you close it and needs no administrator rights.
+
 Prefer `python.exe -m pip` over `pip.exe`. The latter is a separate shim
 executable, and a managed Windows machine may refuse to run a freshly created
 `.exe` from a user profile -- which surfaces as
@@ -124,6 +139,21 @@ python tools/emit_schema_sql.py --dialect postgres
 
 `backend/tests/test_schema_scripts.py` fails if the checked-in script and the
 code disagree.
+
+**If `lapus` already exists** in your `Spec_Stage` -- from the original
+starter-kit script, before the schema was generated from the application code
+-- run `db/postgres/002_upgrade_from_starter_kit.sql` instead, once, as an
+administrator. Re-running `001` will not help: it is all
+`CREATE ... IF NOT EXISTS`, so over an existing schema it silently does
+nothing, and the application keeps failing on the column that was never added.
+Only the ALTER-based upgrade moves an existing schema forward.
+
+The upgrade adds `clears_value`, removes the foreign keys into
+`public.t00_documents` (which a parser rerun would otherwise trip over),
+replaces the plain UNIQUE on change items with the two partial indexes that
+NULL record ids require, and drops the starter kit's unused helper views. It is
+idempotent, and Lapus names it for you at startup if it detects a stale
+schema.
 
 ### 2. Create a restricted application role
 

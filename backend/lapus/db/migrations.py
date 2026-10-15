@@ -182,6 +182,9 @@ def verify_schema(database: Database) -> None:
     }
     missing = [name for name in _REQUIRED_TABLES if name not in present]
     if missing:
+        # An entirely absent schema is a first-time install; a schema that has
+        # some tables but not others has been partially applied. Both are fixed
+        # by the create script, which is a no-op for whatever already exists.
         raise SchemaNotInstalled(
             "The lapus schema is missing "
             + ", ".join(f"lapus.{name}" for name in missing)
@@ -200,9 +203,15 @@ def verify_schema(database: Database) -> None:
         }
         absent = [column for column in columns if column not in found]
         if absent:
+            # Deliberately NOT "re-apply 001_lapus_schema.sql". That script
+            # uses CREATE TABLE IF NOT EXISTS, so running it over an existing
+            # schema silently does nothing and leaves the column still missing
+            # -- an instruction that sends the reader round in a circle. Only
+            # the ALTER-based upgrade can move an existing schema forward.
             raise SchemaNotInstalled(
-                f"lapus.{table} is out of date -- missing "
+                f"lapus.{table} exists but is out of date -- missing "
                 + ", ".join(absent)
-                + ". Re-apply db/postgres/001_lapus_schema.sql as an administrator "
-                "(see docs/LOCAL_SETUP.md)."
+                + ". Apply db/postgres/002_upgrade_from_starter_kit.sql as an "
+                "administrator. Re-running 001_lapus_schema.sql will NOT fix "
+                "this: it skips tables that already exist. See docs/LOCAL_SETUP.md."
             )

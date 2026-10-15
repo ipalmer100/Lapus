@@ -99,3 +99,68 @@ def test_postgres_script_uses_partial_unique_indexes() -> None:
 
 def test_script_is_marked_generated() -> None:
     assert "GENERATED FILE" in POSTGRES_SCRIPT.read_text(encoding="utf-8")
+
+
+UPGRADE_SCRIPT = REPO_ROOT / "db" / "postgres" / "002_upgrade_from_starter_kit.sql"
+
+
+def test_upgrade_script_exists_and_uses_alter() -> None:
+    """An existing schema can only be moved forward by ALTER.
+
+    001_lapus_schema.sql is all CREATE ... IF NOT EXISTS, so applying it over
+    an older schema silently changes nothing. The upgrade path has to be a
+    separate, ALTER-based script.
+    """
+    assert UPGRADE_SCRIPT.is_file(), "the starter-kit upgrade script is missing"
+    sql = UPGRADE_SCRIPT.read_text(encoding="utf-8")
+    assert "ADD COLUMN IF NOT EXISTS clears_value" in sql
+    assert "DROP CONSTRAINT" in sql
+    assert "ux_lapus_change_item_row_target" in sql
+    assert "ux_lapus_change_item_doc_target" in sql
+
+
+def test_stale_schema_error_names_the_upgrade_script() -> None:
+    """The message must not send the reader back to a script that no-ops.
+
+    Regression test: it used to say 're-apply 001_lapus_schema.sql', which
+    skips existing tables and therefore never adds the missing column.
+    """
+    from lapus.db.dialect import POSTGRES
+    from lapus.db.migrations import SchemaNotInstalled, verify_schema
+
+    class _StaleSchema:
+        """Every required table present, but change_item missing a column."""
+
+        dialect = POSTGRES
+
+        def query(self, sql, params=()):
+            if "information_schema.tables" in sql:
+                return [
+                    {"table_name": name}
+                    for name in ("change_request", "change_item",
+                                 "change_event", "schema_version")
+                ]
+            return [{"column_name": "item_id"}]  # clears_value absent
+
+    with pytest.raises(SchemaNotInstalled) as caught:
+        verify_schema(_StaleSchema())
+
+    message = str(caught.value)
+    assert "002_upgrade_from_starter_kit.sql" in message
+    assert "will NOT fix this" in message
+
+
+def test_absent_schema_error_names_the_create_script() -> None:
+    from lapus.db.dialect import POSTGRES
+    from lapus.db.migrations import SchemaNotInstalled, verify_schema
+
+    class _NoSchema:
+        dialect = POSTGRES
+
+        def query(self, sql, params=()):
+            return []
+
+    with pytest.raises(SchemaNotInstalled) as caught:
+        verify_schema(_NoSchema())
+    assert "001_lapus_schema.sql" in str(caught.value)
+    assert "002_upgrade" not in str(caught.value)

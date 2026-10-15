@@ -65,10 +65,13 @@ py -3 -m venv .venv
 # 2. A database to point at. Skip this if you have a real Spec_Stage.
 .venv\Scripts\python.exe tools\make_demo_db.py
 
-# 3. Frontend — one command per line, not chained with &&
+# 3. Frontend. Use npm.cmd, not npm: in PowerShell, `npm` resolves to
+#    npm.ps1, and a machine with the default execution policy refuses to
+#    load it ("running scripts is disabled on this system"). npm.cmd is the
+#    batch wrapper and is not subject to that policy.
 cd frontend
-npm install
-npm run build
+npm.cmd install
+npm.cmd run build
 cd ..
 
 # 4. Run
