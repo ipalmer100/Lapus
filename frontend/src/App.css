@@ -66,15 +66,21 @@
 .link-button.danger { color: var(--bad); }
 .link-button.back { margin-bottom: 8px; display: inline-block; }
 
-button.primary {
+/* Solid buttons. The :not(.link-button) guard is load-bearing: `button.danger`
+   is (0,1,1) and beats `.link-button`'s (0,1,0) on background, while
+   `.link-button.danger` is (0,2,0) and beats it on colour -- so a button
+   carrying both classes rendered red text on a red block, with the label
+   invisible. Scoping these to standalone buttons says what they are for and
+   stops the same collision recurring for any other link-button variant. */
+button.primary:not(.link-button) {
   background: var(--accent); color: #fff; border: 0; padding: 8px 16px;
   border-radius: 6px; cursor: pointer;
 }
-button.secondary {
+button.secondary:not(.link-button) {
   background: var(--surface); color: var(--ink); border: 1px solid var(--rule);
   padding: 8px 16px; border-radius: 6px; cursor: pointer;
 }
-button.danger {
+button.danger:not(.link-button) {
   background: var(--bad); color: #fff; border: 0; padding: 8px 16px;
   border-radius: 6px; cursor: pointer;
 }
