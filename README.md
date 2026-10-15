@@ -77,8 +77,12 @@ cd frontend && npm run dev      # http://localhost:5173, proxies /api
 ### Tests
 
 ```bash
-.venv/bin/python -m pytest backend/tests -q     # 104 tests
+.venv/bin/python -m pytest backend/tests -q     # 109 tests; 10 more with a server
 cd frontend && npx tsc -b                        # typecheck
+
+# Against a live PostgreSQL (otherwise those 10 skip):
+export LAPUS_TEST_POSTGRES_URL=postgresql://lapus_app:devpassword@localhost:5432/Spec_Stage
+.venv/bin/python -m pytest backend/tests -q     # 119 tests
 ```
 
 ## Configuration
@@ -100,13 +104,21 @@ Every value has a working default; a `.env` is optional. See `.env.example`.
 run and attaches it as schema `lapus`. The staging database is never modified,
 so it needs no migration and no permissions work.
 
-**PostgreSQL (scaffolded).** Run `db/postgres/001_lapus_schema.sql` against
-`Spec_Stage`, create a restricted role per
+**PostgreSQL (verified).** Apply `db/postgres/001_lapus_schema.sql` as an
+administrator, create a restricted role per
 [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md), install the extra
 (`pip install -e "backend[postgres]"`) and set a `postgresql://` URL. The read
 boundary there is the database role rather than a connection flag, and Lapus
 checks at startup that the role really lacks INSERT/UPDATE/DELETE on `public`
 staging tables.
+
+Lapus does not create the schema on a server: the application role has no DDL
+rights, so an administrator applies the script and Lapus verifies it at
+startup. That script is generated from `migrations.py`
+(`tools/emit_schema_sql.py`) and a test fails if the two drift apart.
+
+Run the integration suite against a real server with
+`tools/make_test_postgres.py`; see LOCAL_SETUP.
 
 **SQL Server (planned).** `backend/lapus/db/dialect.py` already describes the
 differences — identity columns, `DATETIMEOFFSET`, no `IF NOT EXISTS` on

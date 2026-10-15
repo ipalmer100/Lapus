@@ -67,10 +67,13 @@ def main() -> None:
             print(f"Specification database NOT FOUND at: {staging}")
             print("  Set LAPUS_DATABASE_URL to the Spec_Stage.db your parser produced,")
             print("  or put Spec_Stage.db in the folder you run Lapus from.")
+        print(f"Your change requests: {settings.lapus_database_url}")
     else:
+        # A server backend keeps change requests in its own `lapus` schema;
+        # naming the SQLite path here would point the user at a file that is
+        # never written. The DSN is not printed either -- it carries a password.
         print("Specification database: configured server database")
-
-    print(f"Your change requests: {settings.lapus_database_url}")
+        print("Your change requests: the lapus schema in that same database")
     print("Parser-owned specification data is opened read-only; Lapus cannot modify it.")
     print(f"Signed in as: {settings.dev_user_email}\n")
 

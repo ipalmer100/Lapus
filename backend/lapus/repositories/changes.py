@@ -46,6 +46,7 @@ class ChangeRepository:
             INSERT INTO lapus.change_request (document_id, title, reason, status, created_by)
             VALUES (?, ?, ?, 'DRAFT', ?)
             """,
+            "request_id",
             (document_id, title, reason, actor),
         )
 
@@ -135,6 +136,7 @@ class ChangeRepository:
                  clears_value, change_comment, created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
+            "item_id",
             (request_id, document_id, section_number, target_table, target_record_id,
              target_field, original_value, proposed_value, 1 if clears_value else 0,
              comment, actor),

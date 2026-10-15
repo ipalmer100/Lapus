@@ -37,15 +37,28 @@ def connect_postgres(url: str) -> Database:
 
 
 def assert_staging_readonly(database: Database) -> bool:
-    """Check the connected role cannot write parser-owned tables."""
+    """Check the connected role cannot write parser-owned tables.
+
+    Names the staging tables explicitly rather than matching them with a LIKE
+    pattern: the pattern needed a literal '%', and a '%' in SQL text is a
+    placeholder to psycopg. Naming them is also more honest -- it checks the
+    tables Lapus actually reads, taken from the same section contract that
+    guards every other identifier.
+    """
+    from ..catalog import load_sections
+
+    staging_tables = [section.table for section in load_sections()]
+    staging_tables += ["t00_documents", "t00_ingestion_audit", "t00_unmapped_tables"]
+
     has_write_grant = database.scalar(
         """
         SELECT COUNT(*)
         FROM information_schema.role_table_grants
         WHERE table_schema = 'public'
-          AND table_name LIKE 't__!_%' ESCAPE '!'
+          AND table_name = ANY(?)
           AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE')
           AND grantee = CURRENT_USER
-        """
+        """,
+        (staging_tables,),
     )
     return not has_write_grant

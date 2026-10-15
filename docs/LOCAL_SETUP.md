@@ -80,12 +80,32 @@ force and change requests should not be trusted — check that
 
 ## PostgreSQL
 
-Needed only if you are working against a `Spec_Stage` PostgreSQL database.
+The path to use if your V5.2 parser writes to a PostgreSQL `Spec_Stage`.
+Verified end to end against PostgreSQL 16, including the full change workflow
+and a proof that staging stays untouched.
 
 ### 1. Create the Lapus schema
 
-Run `db/postgres/001_lapus_schema.sql` against `Spec_Stage`, then optionally
-`db/postgres/002_read_model_views.sql`.
+Run `db/postgres/001_lapus_schema.sql` against `Spec_Stage` **as an
+administrator**, then optionally `db/postgres/002_read_model_views.sql`.
+
+This step is not optional and Lapus will not do it for you. On SQLite the
+application creates its own schema, because the store is a file it owns. On a
+server it connects as a least-privilege role with no DDL rights at all, and
+PostgreSQL refuses `CREATE SCHEMA IF NOT EXISTS` for such a role *even when the
+schema already exists* -- it checks the privilege before the short-circuit. So
+Lapus verifies the schema at startup instead, and tells you exactly what is
+missing if it is absent or out of date.
+
+`001_lapus_schema.sql` is generated from `backend/lapus/db/migrations.py` and
+must not be hand-edited. To regenerate it after a schema change:
+
+```bash
+python tools/emit_schema_sql.py --dialect postgres
+```
+
+`backend/tests/test_schema_scripts.py` fails if the checked-in script and the
+code disagree.
 
 ### 2. Create a restricted application role
 
@@ -119,15 +139,31 @@ Never commit a real password. `.env` is gitignored.
 
 ### 4. Verify
 
-```sql
-SELECT d.id, p.customer, p.spec_number, p.item
-FROM public.t00_documents d
-LEFT JOIN public.t01_product_description p ON p.document_id = d.id
-WHERE d.is_present = 1
-LIMIT 10;
+```bash
+curl http://127.0.0.1:8770/api/health
 ```
 
-Then confirm through the app that writes land only under `lapus.*`.
+`"dialect": "postgres"` and `"staging_is_readonly": true` together mean the
+role is correctly restricted. If `staging_is_readonly` is false, the role has
+INSERT/UPDATE/DELETE on `public` that it should not have -- fix the grants
+before trusting anything.
+
+### 5. Integration tests against a real server
+
+The SQLite suite cannot catch backend-specific breakage, so there is a separate
+suite that runs only when you point it at a live database:
+
+```bash
+# Build a throwaway Spec_Stage with the parser's staging schema, the demo
+# corpus, the lapus schema and the restricted role:
+python tools/make_test_postgres.py --admin-url postgresql://postgres@localhost:5432/postgres
+
+export LAPUS_TEST_POSTGRES_URL=postgresql://lapus_app:devpassword@localhost:5432/Spec_Stage
+pytest backend/tests/test_postgres_integration.py
+```
+
+Without `LAPUS_TEST_POSTGRES_URL` those tests skip, so the normal suite still
+runs anywhere.
 
 ---
 

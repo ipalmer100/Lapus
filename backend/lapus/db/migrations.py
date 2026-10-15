@@ -17,7 +17,7 @@ document is a reportable state rather than a constraint violation.
 from __future__ import annotations
 
 from .dialect import Dialect
-from .engine import Database
+from .engine import Database, DatabaseError
 
 SCHEMA_VERSION = 1
 
@@ -129,8 +129,34 @@ def _statements(dialect: Dialect) -> list[str]:
     return statements
 
 
+# Objects every backend must have before Lapus can run.
+_REQUIRED_TABLES = ("change_request", "change_item", "change_event", "schema_version")
+
+# Columns added after the first release. Checked by name because a server
+# schema is applied by an administrator from a .sql file, and an out-of-date
+# script is otherwise only discovered when a user's first change request fails
+# on an unknown column.
+_REQUIRED_COLUMNS = {"change_item": ("clears_value",)}
+
+
+class SchemaNotInstalled(DatabaseError):
+    """The lapus schema is absent or out of date on a server database."""
+
+
 def apply_migrations(database: Database) -> None:
-    """Create the Lapus write model if it is not already there."""
+    """Make sure the Lapus write model is present.
+
+    On SQLite that means creating it: the store is a file Lapus owns, so it
+    can. On a server it means *verifying* it, because the application connects
+    as a least-privilege role with no DDL rights at all -- and PostgreSQL
+    refuses `CREATE SCHEMA IF NOT EXISTS` for such a role even when the schema
+    already exists, checking the privilege before the short-circuit. There the
+    schema is installed by an administrator from db/postgres/001_lapus_schema.sql.
+    """
+    if not database.dialect.application_manages_schema:
+        verify_schema(database)
+        return
+
     with database.transaction():
         for statement in _statements(database.dialect):
             database.execute(statement)
@@ -139,4 +165,44 @@ def apply_migrations(database: Database) -> None:
         if current is None:
             database.execute(
                 "INSERT INTO lapus.schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
+            )
+
+
+def verify_schema(database: Database) -> None:
+    """Confirm an administrator-installed lapus schema matches what the code needs.
+
+    Raises with the remedy named, rather than letting the gap surface later as
+    a failed change request against an unknown column.
+    """
+    present = {
+        row["table_name"]
+        for row in database.query(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'lapus'"
+        )
+    }
+    missing = [name for name in _REQUIRED_TABLES if name not in present]
+    if missing:
+        raise SchemaNotInstalled(
+            "The lapus schema is missing "
+            + ", ".join(f"lapus.{name}" for name in missing)
+            + ". Apply db/postgres/001_lapus_schema.sql to this database as an "
+            "administrator (see docs/LOCAL_SETUP.md)."
+        )
+
+    for table, columns in _REQUIRED_COLUMNS.items():
+        found = {
+            row["column_name"]
+            for row in database.query(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'lapus' AND table_name = ?",
+                (table,),
+            )
+        }
+        absent = [column for column in columns if column not in found]
+        if absent:
+            raise SchemaNotInstalled(
+                f"lapus.{table} is out of date -- missing "
+                + ", ".join(absent)
+                + ". Re-apply db/postgres/001_lapus_schema.sql as an administrator "
+                "(see docs/LOCAL_SETUP.md)."
             )

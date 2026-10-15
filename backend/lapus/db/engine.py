@@ -38,6 +38,34 @@ class StagingWriteAttempt(DatabaseError):
     """
 
 
+_STAGING_REFUSED = (
+    "Refused a write to parser-owned staging data. "
+    "Lapus changes belong in the lapus schema."
+)
+
+# Driver messages safe to pass through: short, and about SQL the application
+# wrote rather than about the connection. Anything else is replaced with a
+# generic line, so a message carrying a DSN or a server traceback cannot reach
+# the browser through an error path.
+_SAFE_ERROR_PREFIXES = (
+    "relation", "column", "syntax error", "duplicate key",
+    "violates", "no such table", "no such column",
+)
+
+
+def _is_permission_denied(exc: Exception) -> bool:
+    """Whether a driver error is the database refusing a write on privilege."""
+    return "permission denied" in str(exc).lower()
+
+
+def _safe_driver_message(exc: Exception) -> str:
+    first_line = str(exc).strip().splitlines()[0] if str(exc).strip() else ""
+    lowered = first_line.lower()
+    if any(lowered.startswith(prefix) for prefix in _SAFE_ERROR_PREFIXES):
+        return first_line
+    return "The database rejected that request."
+
+
 class Database:
     """A live connection to the staging data plus the Lapus write store."""
 
@@ -82,21 +110,23 @@ class Database:
             finally:
                 cursor.close()
 
-    def insert_returning_id(self, sql: str, params: Sequence[Any] = ()) -> int:
+    def insert_returning_id(self, sql: str, key_column: str,
+                            params: Sequence[Any] = ()) -> int:
         """Insert one row and return its generated primary key.
 
-        The three targets disagree about how to get this back (lastrowid,
-        RETURNING, SCOPE_IDENTITY), so it is a method rather than something
-        each repository open-codes.
+        The three targets disagree about how to get this back -- lastrowid,
+        RETURNING, OUTPUT INSERTED -- so the caller writes a plain INSERT and
+        names its key column, and the dialect supplies the rest.
         """
         with self._lock:
-            cursor = self._execute(sql, params)
+            statement = self._dialect.add_returning(sql, key_column)
+            cursor = self._execute(statement, params)
             try:
-                if self._dialect.name == "sqlite":
+                if self._dialect.returning_style == "none":
                     return int(cursor.lastrowid)
                 row = cursor.fetchone()
                 if row is None:
-                    raise DatabaseError("Insert did not return a generated id.")
+                    raise DatabaseError("The insert did not return a generated id.")
                 return int(row[0])
             finally:
                 cursor.close()
@@ -121,15 +151,31 @@ class Database:
         prepared = self._dialect.apply_paramstyle(sql)
         try:
             cursor = self._connection.cursor()
-            cursor.execute(prepared, tuple(params))
+            if params:
+                cursor.execute(prepared, tuple(params))
+            else:
+                # Deliberately not `execute(sql, ())`. psycopg scans for
+                # placeholders whenever a params argument is present, so a
+                # literal '%' in the SQL -- a LIKE pattern, a modulo -- is read
+                # as a malformed placeholder and raises. With no parameters to
+                # bind there is nothing to scan for, and the statement is sent
+                # as written.
+                cursor.execute(prepared)
             return cursor
         except sqlite3.OperationalError as exc:
             if "readonly database" in str(exc):
-                raise StagingWriteAttempt(
-                    "Refused a write to parser-owned staging data. "
-                    "Lapus changes belong in the lapus schema."
-                ) from exc
+                raise StagingWriteAttempt(_STAGING_REFUSED) from exc
             raise DatabaseError(str(exc)) from exc
+        except Exception as exc:
+            # Any other driver's error. Deliberately broad: a psycopg or pyodbc
+            # exception must never reach a route unwrapped, because its text can
+            # carry the connection string, the host, or a full server traceback
+            # (AGENTS.md, Security). Re-raises Lapus's own errors untouched.
+            if isinstance(exc, DatabaseError):
+                raise
+            if _is_permission_denied(exc):
+                raise StagingWriteAttempt(_STAGING_REFUSED) from exc
+            raise DatabaseError(_safe_driver_message(exc)) from exc
 
 
 def connect(staging_url: str, lapus_url: str) -> Database:

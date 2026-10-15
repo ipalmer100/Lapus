@@ -9,10 +9,24 @@ The MVP described below is **built**. Read `README.md` for how it fits
 together and `docs/adr/0001-staging-overlay-model.md` for the decision the
 whole design rests on before changing anything structural.
 
-The database is **SQLite** today, with PostgreSQL scaffolded and SQL Server
-planned. Where the rules below say PostgreSQL, they mean whichever backend is
-configured -- the `lapus` schema exists on all three (via ATTACH on SQLite),
-and repository code is written once against `db/engine.py`.
+The database is **SQLite or PostgreSQL**; both are tested, PostgreSQL against
+a live server (`backend/tests/test_postgres_integration.py`, skipped unless
+`LAPUS_TEST_POSTGRES_URL` is set). SQL Server is described in `db/dialect.py`
+but has no connection function yet. Where the rules below say PostgreSQL, they
+mean whichever backend is configured -- the `lapus` schema exists on all three
+(via ATTACH on SQLite), and repository code is written once against
+`db/engine.py`.
+
+Two things differ by backend and have bitten before:
+
+- **Lapus creates its own schema only on SQLite.** On a server the application
+  role has no DDL rights, and PostgreSQL rejects `CREATE ... IF NOT EXISTS`
+  for such a role even when the object exists. `apply_migrations` therefore
+  verifies on a server and creates only on SQLite.
+- **`db/postgres/001_lapus_schema.sql` is generated**, by
+  `tools/emit_schema_sql.py`, from `migrations.py`. Never hand-edit it; change
+  `migrations.py` and regenerate. A hand-maintained copy silently lost the
+  `clears_value` column once and broke every write on PostgreSQL.
 
 ## Non-negotiable data rules
 1. Treat `public.t01_*` through `public.t11_*` as parser-owned, read-only staging data.
@@ -54,6 +68,17 @@ and repository code is written once against `db/engine.py`.
 - Table and column names cannot be bound as parameters. Every one that reaches
   SQL must first pass `catalog.validate_target`, which checks it against
   `config/spec_sections.json`. Do not bypass this.
+- A literal `%` in SQL text breaks on PostgreSQL: psycopg reads it as a
+  placeholder whenever a params argument is present. `Database._execute` omits
+  the argument entirely when there are no parameters, which covers it -- but
+  prefer binding a value over writing a `%` into the statement.
+- An INSERT that needs its generated key back goes through
+  `Database.insert_returning_id(sql, key_column, params)`. Do not read
+  `lastrowid` directly: it is SQLite-only, and PostgreSQL needs RETURNING
+  while SQL Server needs OUTPUT before VALUES.
+- Driver exceptions must never reach a route unwrapped -- their text can carry
+  the DSN or a server traceback. `Database._execute` wraps them; keep it that
+  way.
 
 ## Security
 - Never commit database passwords or secrets.

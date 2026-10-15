@@ -61,6 +61,23 @@ class Dialect:
     # generating DDL that would not run there.
     supports_if_not_exists_ddl: bool
 
+    # Whether the application creates its own schema objects at startup.
+    #
+    # True only for SQLite, where the `lapus` store is a file Lapus owns
+    # outright. On a server the application connects as a least-privilege role
+    # with no DDL rights at all (docs/LOCAL_SETUP.md), and PostgreSQL refuses
+    # `CREATE SCHEMA IF NOT EXISTS` for such a role *even when the schema
+    # already exists* -- it checks the privilege before the short-circuit. So
+    # there the schema is an administrative artefact, applied from
+    # db/postgres/001_lapus_schema.sql, and Lapus verifies it instead.
+    application_manages_schema: bool
+
+    # How an INSERT hands back the generated primary key. SQLite reads
+    # cursor.lastrowid and needs nothing; PostgreSQL appends RETURNING; SQL
+    # Server puts OUTPUT *before* VALUES, which is why this is a placement
+    # rule applied by `add_returning` rather than a suffix to concatenate.
+    returning_style: str
+
     def qualified(self, table: str) -> str:
         """`lapus.change_request` -- how the table is named in a query."""
         return f"lapus.{table}"
@@ -82,6 +99,24 @@ class Dialect:
         if where:
             statement += f" WHERE {where}"
         return statement
+
+    def add_returning(self, insert_sql: str, column: str) -> str:
+        """Make an INSERT hand back `column`, however this backend spells that.
+
+        Repositories write a plain INSERT and this adds the backend's clause,
+        so no repository has to know which of the three it is talking to.
+        """
+        if self.returning_style == "none":
+            return insert_sql
+        if self.returning_style == "returning":
+            return f"{insert_sql.rstrip().rstrip(';')} RETURNING {column}"
+        if self.returning_style == "output":
+            # OUTPUT sits between the column list and VALUES, not at the end.
+            head, separator, tail = insert_sql.rpartition("VALUES")
+            if not separator:
+                raise ValueError("Expected a VALUES clause in: " + insert_sql)
+            return f"{head.rstrip()} OUTPUT INSERTED.{column} VALUES{tail}"
+        raise ValueError(f"Unsupported returning style: {self.returning_style}")
 
     def apply_paramstyle(self, sql: str) -> str:
         """Rewrite `?` markers if this backend expects something else.
@@ -108,6 +143,8 @@ SQLITE = Dialect(
     schema_qualifies_index_name=True,
     schema_qualifies_fk_target=False,
     supports_if_not_exists_ddl=True,
+    application_manages_schema=True,
+    returning_style="none",
 )
 
 POSTGRES = Dialect(
@@ -121,6 +158,8 @@ POSTGRES = Dialect(
     schema_qualifies_index_name=False,
     schema_qualifies_fk_target=True,
     supports_if_not_exists_ddl=True,
+    application_manages_schema=False,
+    returning_style="returning",
 )
 
 MSSQL = Dialect(
@@ -134,6 +173,8 @@ MSSQL = Dialect(
     schema_qualifies_index_name=False,
     schema_qualifies_fk_target=True,
     supports_if_not_exists_ddl=False,
+    application_manages_schema=False,
+    returning_style="output",
 )
 
 _BY_NAME = {d.name: d for d in (SQLITE, POSTGRES, MSSQL)}
