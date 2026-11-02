@@ -73,9 +73,9 @@ export function SectionView({ section, documentId, canPropose, onPropose }: Prop
   if (section.layout === 'form') {
     const row = section.rows[0]
     return (
-      <dl className="section-form">
+      <dl className="fields-grid">
         {section.editable_fields.map((field) => (
-          <div key={field} className="form-field">
+          <div key={field} className="field-pair">
             <dt>{humanizeField(field)}</dt>
             <dd>
               <FieldValue field={row.fields[field]} />
@@ -114,8 +114,8 @@ export function SectionView({ section, documentId, canPropose, onPropose }: Prop
   const isMatrix = section.layout === 'quality_matrix'
 
   return (
-    <div className="section-table-wrap">
-      <table className={isMatrix ? 'section-table matrix' : 'section-table'}>
+    <div className="detail-table-wrap">
+      <table className={isMatrix ? 'detail-table matrix' : 'detail-table'}>
         <thead>
           {isMatrix && (
             // Limit columns read as a range, so they get a spanning header:

@@ -1,11 +1,12 @@
 // Reading one specification.
 //
-// The persistent header carries identity and provenance; the left rail walks
-// the eleven sections in source-document order. Sections are fetched when
-// opened rather than all at once -- eleven queries per spec across a corpus
-// this size is worth avoiding, and it keeps the first paint fast.
+// All eleven sections on one continuous scroll, as Cobalt's spec detail does
+// it -- the point being that nobody should have to click through eleven tabs
+// to find the Bill of Materials. The left rail jumps to a section rather than
+// swapping which one is mounted, and highlights whichever is currently in
+// view.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import type { ChangeTarget, Section, SpecChangeHistory, SpecDetail } from '../../types'
 import { blank } from '../../display'
@@ -15,47 +16,84 @@ import { SpecChangeHistoryView } from './SpecChangeHistoryView'
 interface Props {
   documentId: number
   canPropose: boolean
-  onBack: () => void
   onPropose: (target: ChangeTarget) => void
   refreshToken: number
 }
 
-export function SpecWorkspace({ documentId, canPropose, onBack, onPropose, refreshToken }: Props) {
+export function SpecWorkspace({ documentId, canPropose, onPropose, refreshToken }: Props) {
   const [detail, setDetail] = useState<SpecDetail | null>(null)
-  const [activeSection, setActiveSection] = useState(1)
-  const [section, setSection] = useState<Section | null>(null)
+  const [sections, setSections] = useState<Section[] | null>(null)
   const [history, setHistory] = useState<SpecChangeHistory | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  const [current, setCurrent] = useState(1)
   const [error, setError] = useState<string | null>(null)
-  const [loadingSection, setLoadingSection] = useState(false)
 
-  const loadDetail = useCallback(async () => {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const sectionRefs = useRef(new Map<number, HTMLElement>())
+
+  const load = useCallback(async () => {
+    setError(null)
     try {
-      setDetail(await api.getSpec(documentId))
+      // Both at once: the header alone is not worth a round trip when the
+      // sections are what the page is for.
+      const [spec, all] = await Promise.all([
+        api.getSpec(documentId),
+        api.getAllSections(documentId),
+      ])
+      setDetail(spec)
+      setSections(all)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not open this specification.')
     }
   }, [documentId])
 
-  useEffect(() => { void loadDetail() }, [loadDetail, refreshToken])
-
   useEffect(() => {
-    let cancelled = false
-    setLoadingSection(true)
-    api.getSection(documentId, activeSection)
-      .then((s) => { if (!cancelled) setSection(s) })
-      .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : 'Could not load section.') })
-      .finally(() => { if (!cancelled) setLoadingSection(false) })
-    return () => { cancelled = true }
-  }, [documentId, activeSection, refreshToken])
+    setDetail(null)
+    setSections(null)
+    setShowHistory(false)
+    setCurrent(1)
+    void load()
+  }, [load, refreshToken])
 
   useEffect(() => {
     if (!showHistory) return
     void api.getSpecHistory(documentId).then(setHistory).catch(() => setHistory(null))
   }, [documentId, showHistory, refreshToken])
 
+  // Highlight whichever section is nearest the top of the scrolling pane.
+  useEffect(() => {
+    const pane = scrollRef.current
+    if (!pane || !sections) return
+    const onScroll = () => {
+      let nearest = 1
+      let best = Infinity
+      for (const [number, element] of sectionRefs.current) {
+        const offset = Math.abs(element.getBoundingClientRect().top - pane.getBoundingClientRect().top)
+        if (offset < best) {
+          best = offset
+          nearest = number
+        }
+      }
+      setCurrent(nearest)
+    }
+    pane.addEventListener('scroll', onScroll, { passive: true })
+    return () => pane.removeEventListener('scroll', onScroll)
+  }, [sections])
+
+  const jumpTo = (number: number) => {
+    sectionRefs.current.get(number)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const availability = useMemo(() => {
+    const map = new Map<number, { empty: boolean; overrides: number }>()
+    for (const section of sections ?? []) {
+      map.set(section.number, { empty: section.is_empty, overrides: section.override_count })
+    }
+    return map
+  }, [sections])
+
   if (error) return <div className="error-banner">{error}</div>
-  if (!detail) return <div className="loading">Opening specification…</div>
+  if (!detail || !sections) return <div className="loading">Opening specification…</div>
 
   const h = detail.header
   const status = detail.staging_status
@@ -63,35 +101,31 @@ export function SpecWorkspace({ documentId, canPropose, onBack, onPropose, refre
   return (
     <div className="workspace">
       <header className="spec-header">
-        <button type="button" className="link-button back" onClick={onBack}>&larr; All specifications</button>
-        <div className="spec-identity">
-          <h1>{blank(h.spec_number) ?? blank(h.filename) ?? `Document ${h.document_id}`}</h1>
-          <p className="spec-subtitle">
-            {blank(h.customer) ?? 'Customer not stated'}
-            {blank(h.item) && <> &middot; Item {blank(h.item)}</>}
-            {blank(h.revision_number) && <> &middot; Revision {blank(h.revision_number)}</>}
-          </p>
-          {blank(h.structure_description) && (
-            <p className="spec-structure">{blank(h.structure_description)}</p>
-          )}
-        </div>
+        <h1>{blank(h.spec_number) ?? blank(h.filename) ?? `Document ${h.document_id}`}</h1>
+        <p className="spec-subtitle">
+          {blank(h.customer) ?? 'Customer not stated'}
+          {blank(h.item) && <> &middot; Item {blank(h.item)}</>}
+          {blank(h.revision_number) && <> &middot; Revision {blank(h.revision_number)}</>}
+        </p>
+        {blank(h.structure_description) && (
+          <p className="spec-structure">{blank(h.structure_description)}</p>
+        )}
         <div className="spec-badges">
           {h.is_present === 0 && (
-            <span className="chip chip-warn" title="The source Word document was not found on the last parser run">
+            <span className="chip chip-warn" title="The source document was not found on the last parser run">
               Source file missing
             </span>
           )}
           {detail.approved_override_count > 0 && (
             <span className="chip chip-change">
-              {detail.approved_override_count} approved change{detail.approved_override_count === 1 ? '' : 's'}
+              {detail.approved_override_count} approved change
+              {detail.approved_override_count === 1 ? '' : 's'}
             </span>
           )}
           <button type="button" className="link-button" onClick={() => setShowHistory((s) => !s)}>
             {showHistory ? 'Hide change history' : 'Change history'}
           </button>
         </div>
-        {/* Source traceability, kept quiet: useful for support, not something a
-            manufacturing user needs to read every time. */}
         <details className="source-provenance">
           <summary>Source document</summary>
           <dl>
@@ -104,7 +138,8 @@ export function SpecWorkspace({ documentId, canPropose, onBack, onPropose, refre
               <div>
                 <dt>Mapping</dt>
                 <dd>
-                  {status.mapped_source_tables} table{status.mapped_source_tables === 1 ? '' : 's'} mapped
+                  {status.mapped_source_tables} table
+                  {status.mapped_source_tables === 1 ? '' : 's'} mapped
                   {status.supplemental_source_tables > 0 && `, ${status.supplemental_source_tables} supplemental`}
                   {status.unmapped_source_tables > 0 && `, ${status.unmapped_source_tables} unmapped`}
                 </dd>
@@ -117,35 +152,47 @@ export function SpecWorkspace({ documentId, canPropose, onBack, onPropose, refre
       {showHistory && <SpecChangeHistoryView history={history} />}
 
       <div className="workspace-body">
-        <nav className="section-nav" aria-label="Specification sections">
+        <nav className="section-rail" aria-label="Sections">
           <ol>
-            {detail.sections.map((s) => (
-              <li key={s.number}>
-                <button
-                  type="button"
-                  className={[
-                    s.number === activeSection ? 'active' : '',
-                    s.is_empty ? 'empty' : '',
-                  ].filter(Boolean).join(' ')}
-                  onClick={() => setActiveSection(s.number)}
-                >
-                  <span className="section-number">{String(s.number).padStart(2, '0')}</span>
-                  <span className="section-label">{s.label}</span>
-                  {s.override_count > 0 && <span className="section-dot" title="Contains approved changes" />}
-                  {s.is_empty && <span className="section-none">none</span>}
-                </button>
-              </li>
-            ))}
+            {sections.map((section) => {
+              const meta = availability.get(section.number)
+              return (
+                <li key={section.number}>
+                  <button
+                    type="button"
+                    className={[
+                      section.number === current ? 'current' : '',
+                      meta?.empty ? 'empty' : '',
+                    ].filter(Boolean).join(' ')}
+                    onClick={() => jumpTo(section.number)}
+                  >
+                    <span className="section-number">{String(section.number).padStart(2, '0')}</span>
+                    <span className="section-label">{section.label}</span>
+                    {(meta?.overrides ?? 0) > 0 && (
+                      <span className="section-dot" title="Contains approved changes" />
+                    )}
+                  </button>
+                </li>
+              )
+            })}
           </ol>
         </nav>
 
-        <section className="section-content" aria-live="polite">
-          {loadingSection && !section ? (
-            <div className="loading">Loading…</div>
-          ) : section ? (
-            <>
-              <h2 className="section-heading">
+        <div className="sections-scroll" ref={scrollRef}>
+          {sections.map((section) => (
+            <section
+              key={section.number}
+              className="detail-section"
+              ref={(element) => {
+                if (element) sectionRefs.current.set(section.number, element)
+                else sectionRefs.current.delete(section.number)
+              }}
+            >
+              <h2>
                 {String(section.number).padStart(2, '0')} &nbsp;{section.label}
+                {!section.is_empty && section.is_repeating && (
+                  <span className="section-count"> &nbsp;· {section.rows.length} rows</span>
+                )}
               </h2>
               <SectionView
                 section={section}
@@ -153,9 +200,9 @@ export function SpecWorkspace({ documentId, canPropose, onBack, onPropose, refre
                 canPropose={canPropose}
                 onPropose={onPropose}
               />
-            </>
-          ) : null}
-        </section>
+            </section>
+          ))}
+        </div>
       </div>
     </div>
   )

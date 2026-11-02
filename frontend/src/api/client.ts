@@ -82,6 +82,11 @@ export const api = {
   getSection: (documentId: number, sectionNumber: number) =>
     request<Section>(`/api/specs/${documentId}/sections/${sectionNumber}`),
 
+  // Every section at once. The workspace shows all eleven on one scroll, so
+  // one request beats eleven.
+  getAllSections: (documentId: number) =>
+    request<Section[]>(`/api/specs/${documentId}/sections`),
+
   getSpecHistory: (documentId: number) =>
     request<SpecChangeHistory>(`/api/specs/${documentId}/changes`),
 
