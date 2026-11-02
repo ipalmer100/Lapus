@@ -302,3 +302,96 @@ def test_bulk_edit_has_a_ceiling(workflow, actor, database) -> None:
 
     with pytest.raises(ValidationError, match="Split it into batches"):
         workflow.add_items(actor, request_id, [_proposal(documents[0])] * 501)
+
+
+# --- apply mode -----------------------------------------------------------
+
+
+def test_apply_takes_a_draft_straight_to_approved(workflow, applier, bom_record_id, first_document_id) -> None:
+    request = workflow.create_request(applier, first_document_id, "Direct apply", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(applier, request_id, 3, bom_record_id, "supplier", "Applied Co", False, None)
+
+    result = workflow.apply_directly(applier, request_id, "Urgent correction")
+
+    assert result["status"] == "APPROVED"
+    assert result["decided_by"] == applier.email
+    assert result["submitted_by"] == applier.email
+
+
+def test_apply_is_marked_distinctly_in_the_audit_trail(workflow, applier, bom_record_id, first_document_id) -> None:
+    """A change nobody reviewed must not look like one that was reviewed."""
+    request = workflow.create_request(applier, first_document_id, "Direct apply", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(applier, request_id, 3, bom_record_id, "supplier", "Applied Co", False, None)
+    result = workflow.apply_directly(applier, request_id, None)
+
+    types = [e["event_type"] for e in result["events"]]
+    assert "APPLIED" in types
+    assert "SUBMITTED" not in types, "an applied change must not claim it was submitted for review"
+    assert "APPROVED" not in types, "nor that someone approved it"
+
+
+def test_apply_produces_the_same_overlay_as_review(workflow, applier, database, first_document_id, bom_record_id) -> None:
+    """Applying is a shortcut through the workflow, not a different change."""
+    specs = SpecService(database)
+    source = specs.get_section(first_document_id, 3)["rows"][0]["fields"]["supplier"]["source_value"]
+
+    request = workflow.create_request(applier, first_document_id, "Direct apply", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(applier, request_id, 3, bom_record_id, "supplier", "Applied Co", False, None)
+    workflow.apply_directly(applier, request_id, None)
+
+    field = specs.get_section(first_document_id, 3)["rows"][0]["fields"]["supplier"]
+    assert field["value"] == "Applied Co"
+    assert field["source_value"] == source, "the staged value must still survive"
+    assert field["is_overridden"] is True
+
+
+def test_apply_is_refused_without_the_capability(workflow, actor, bom_record_id, first_document_id) -> None:
+    """The default actor is an approver but may not apply; that must not be enough."""
+    assert actor.is_approver and not actor.may_apply_directly
+    request = workflow.create_request(actor, first_document_id, "Direct apply", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(actor, request_id, 3, bom_record_id, "supplier", "Applied Co", False, None)
+
+    with pytest.raises(PermissionDenied, match="without review"):
+        workflow.apply_directly(actor, request_id, None)
+
+
+def test_apply_requires_approver_as_well(workflow, author, bom_record_id, first_document_id) -> None:
+    """Applying is approving without the round trip, so it cannot be a lower bar."""
+    applier_but_not_approver = Actor(
+        email=author.email, is_approver=False, may_self_approve=True, may_apply_directly=True,
+    )
+    request = workflow.create_request(applier_but_not_approver, first_document_id, "X", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(applier_but_not_approver, request_id, 3, bom_record_id, "supplier", "Co", False, None)
+
+    with pytest.raises(PermissionDenied):
+        workflow.apply_directly(applier_but_not_approver, request_id, None)
+
+
+def test_apply_refuses_an_empty_request(workflow, applier, first_document_id) -> None:
+    request = workflow.create_request(applier, first_document_id, "Empty", None)
+    with pytest.raises(WorkflowError, match="at least one change"):
+        workflow.apply_directly(applier, int(request["request_id"]), None)
+
+
+def test_apply_refuses_an_already_decided_request(workflow, applier, bom_record_id, first_document_id) -> None:
+    request = workflow.create_request(applier, first_document_id, "Direct apply", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(applier, request_id, 3, bom_record_id, "supplier", "Applied Co", False, None)
+    workflow.apply_directly(applier, request_id, None)
+
+    with pytest.raises(WorkflowError):
+        workflow.apply_directly(applier, request_id, None)
+
+
+def test_apply_cannot_touch_someone_elses_draft(workflow, actor, applier, bom_record_id, first_document_id) -> None:
+    request = workflow.create_request(actor, first_document_id, "Not yours", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(actor, request_id, 3, bom_record_id, "supplier", "Co", False, None)
+
+    with pytest.raises(PermissionDenied):
+        workflow.apply_directly(applier, request_id, None)

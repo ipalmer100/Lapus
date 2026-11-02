@@ -131,6 +131,7 @@ Every value has a working default; a `.env` is optional. See `.env.example`.
 | `DEV_USER_EMAIL` | `developer@example.com` | Stand-in identity until real authentication. |
 | `LAPUS_DEV_USER_IS_APPROVER` | `true` | Whether this user sees the approvals and admin areas. |
 | `LAPUS_ALLOW_SELF_APPROVAL` | `true` | Whether one person may approve their own submission. See the security note below. |
+| `LAPUS_ALLOW_DIRECT_APPLY` | `false` | Whether an approver may apply a change with no review at all. Recorded as `APPLIED` in the audit trail. |
 | `BACKEND_PORT` | `8770` | |
 
 ## Database setup

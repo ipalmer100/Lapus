@@ -137,6 +137,11 @@ export const api = {
   deleteItem: (requestId: number, itemId: number) =>
     request<void>(`/api/change-requests/${requestId}/items/${itemId}`, { method: 'DELETE' }),
 
+  applyRequest: (requestId: number, comment: string | null) =>
+    request<ChangeRequestDetail>(`/api/change-requests/${requestId}/apply`, {
+      method: 'POST', body: JSON.stringify({ comment }),
+    }),
+
   submitRequest: (requestId: number) =>
     request<ChangeRequestDetail>(`/api/change-requests/${requestId}/submit`, { method: 'POST' }),
 

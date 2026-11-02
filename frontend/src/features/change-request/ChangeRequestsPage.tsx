@@ -138,6 +138,9 @@ function RequestDetail({ detail, busy, onOpenSpec, onAct }: {
   onAct: (action: () => Promise<unknown>) => Promise<void>
 }) {
   const [decisionComment, setDecisionComment] = useState('')
+  // Applying skips review entirely, so it asks once. A button that removes
+  // the only control in the workflow should not be a single stray click.
+  const [confirmingApply, setConfirmingApply] = useState(false)
 
   return (
     <>
@@ -199,6 +202,32 @@ function RequestDetail({ detail, busy, onOpenSpec, onAct }: {
                   onClick={() => void onAct(() => api.submitRequest(detail.request_id))}>
             Submit for review
           </button>
+        )}
+        {detail.can_apply && !confirmingApply && (
+          <button type="button" className="secondary apply-button" disabled={busy}
+                  title="Approve and apply these changes immediately, with no review"
+                  onClick={() => setConfirmingApply(true)}>
+            Apply without review
+          </button>
+        )}
+        {detail.can_apply && confirmingApply && (
+          <div className="apply-confirm">
+            <span>
+              Apply {detail.items.length} change{detail.items.length === 1 ? '' : 's'} now?
+              Nobody else will review this, and the audit trail will record that.
+            </span>
+            <button type="button" className="secondary" disabled={busy}
+                    onClick={() => setConfirmingApply(false)}>
+              Cancel
+            </button>
+            <button type="button" className="danger" disabled={busy}
+                    onClick={() => {
+                      setConfirmingApply(false)
+                      void onAct(() => api.applyRequest(detail.request_id, decisionComment || null))
+                    }}>
+              Apply now
+            </button>
+          </div>
         )}
         {detail.can_decide && (
           <div className="decision-panel">

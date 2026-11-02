@@ -44,6 +44,7 @@ def settings(staging_db: Path, tmp_path: Path) -> Settings:
         lapus_database_url=str(tmp_path / "lapus.db"),
         dev_user_email="tester@example.com",
         dev_user_is_approver=True,
+        allow_direct_apply=False,
         allow_self_approval=True,
         host="127.0.0.1",
         port=8770,
@@ -62,6 +63,15 @@ def database(settings: Settings) -> Iterator[Database]:
 @pytest.fixture
 def actor() -> Actor:
     return Actor(email="tester@example.com", is_approver=True, may_self_approve=True)
+
+
+@pytest.fixture
+def applier() -> Actor:
+    """Authorised to apply changes without review."""
+    return Actor(
+        email="applier@example.com", is_approver=True,
+        may_self_approve=True, may_apply_directly=True,
+    )
 
 
 @pytest.fixture

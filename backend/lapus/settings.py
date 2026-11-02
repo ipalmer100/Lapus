@@ -83,6 +83,15 @@ class Settings:
     # parser-health admin area.
     dev_user_is_approver: bool
 
+    # Whether a change may be applied immediately, without review.
+    #
+    # Off by default, and deliberately: this removes the approval step, which
+    # is the control the whole workflow exists to provide. It is worth having
+    # -- correcting forty specs after a supplier requalification should not
+    # need a review round trip per spec -- but it is a decision to take
+    # explicitly, not a default to inherit.
+    allow_direct_apply: bool
+
     # Whether one person may approve a request they submitted themselves.
     # Production practice is separation of duties, and the workflow enforces it
     # when this is off. It defaults ON because the POC runs as a single
@@ -119,6 +128,7 @@ def load_settings() -> Settings:
         lapus_database_url=lapus_database_url,
         dev_user_email=os.environ.get("DEV_USER_EMAIL", "developer@example.com"),
         dev_user_is_approver=_env_flag("LAPUS_DEV_USER_IS_APPROVER", default=True),
+        allow_direct_apply=_env_flag("LAPUS_ALLOW_DIRECT_APPLY", default=False),
         allow_self_approval=_env_flag("LAPUS_ALLOW_SELF_APPROVAL", default=True),
         host=os.environ.get("BACKEND_HOST", "127.0.0.1"),
         port=int(os.environ.get("BACKEND_PORT", "8770")),

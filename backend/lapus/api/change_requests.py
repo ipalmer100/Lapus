@@ -169,6 +169,16 @@ def delete_item(request_id: int, item_id: int, workflow: Workflow,
     _handle(lambda: workflow.delete_item(actor, request_id, item_id))
 
 
+@router.post("/{request_id}/apply")
+def apply_directly(request_id: int, body: Decision, workflow: Workflow,
+                   actor: CurrentActor) -> dict[str, Any]:
+    """Take a draft straight to APPROVED, skipping review.
+
+    Requires LAPUS_ALLOW_DIRECT_APPLY and an approver; 403 otherwise.
+    """
+    return _handle(lambda: workflow.apply_directly(actor, request_id, body.comment))
+
+
 @router.post("/{request_id}/submit")
 def submit(request_id: int, workflow: Workflow, actor: CurrentActor) -> dict[str, Any]:
     return _handle(lambda: workflow.submit(actor, request_id))

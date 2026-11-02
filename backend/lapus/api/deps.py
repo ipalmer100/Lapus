@@ -77,6 +77,7 @@ def get_actor() -> Actor:
         email=settings.dev_user_email,
         is_approver=settings.dev_user_is_approver,
         may_self_approve=settings.allow_self_approval,
+        may_apply_directly=settings.allow_direct_apply,
     )
 
 

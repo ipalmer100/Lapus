@@ -46,9 +46,12 @@ class SpecService:
             raise SpecNotFound(f"No specification with document id {document_id}.")
 
         availability = self._specs.section_availability(document_id)
-        approved = index_approved_items(self._changes.approved_items_for_document(document_id))
+        # Fetched once and used twice. This ran the same query a second time
+        # for the per-section counts, on every spec open.
+        approved_items = self._changes.approved_items_for_document(document_id)
+        approved = index_approved_items(approved_items)
         overrides_by_section: dict[int, int] = {}
-        for item in self._changes.approved_items_for_document(document_id):
+        for item in approved_items:
             number = int(item["section_number"])
             overrides_by_section[number] = overrides_by_section.get(number, 0) + 1
 

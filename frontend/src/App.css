@@ -689,3 +689,15 @@ tr:hover .cell-propose, .field-pair:hover .propose-button { opacity: 1; }
   border-radius: 1px; cursor: ns-resize; opacity: 0;
 }
 td:hover .fill-handle, .cell-dirty .fill-handle { opacity: 1; }
+
+/* --- apply mode ------------------------------------------------------------ */
+
+.apply-button { border-color: var(--warn); color: var(--warn); }
+.apply-button:hover { background: var(--warn-soft); }
+
+.apply-confirm {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--warn-soft); color: var(--warn);
+  border: 1px solid var(--warn); border-radius: 6px;
+  padding: 9px 12px; font-size: 12.5px; flex: 1; min-width: 300px;
+}

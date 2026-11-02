@@ -177,6 +177,7 @@ export interface ChangeRequestDetail extends ChangeRequestSummary {
   can_edit: boolean
   can_submit: boolean
   can_decide: boolean
+  can_apply: boolean
 }
 
 export interface SpecChangeHistoryItem extends ChangeItem {
@@ -204,7 +205,7 @@ export interface Health {
     staging_is_readonly: boolean
     document_count: number
   } | null
-  user: { email: string; is_approver: boolean } | null
+  user: { email: string; is_approver: boolean; may_apply_directly: boolean } | null
 }
 
 export interface AdminStagingStatus {

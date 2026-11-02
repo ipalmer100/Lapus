@@ -79,6 +79,12 @@ class Actor:
     # (see Settings.allow_self_approval).
     may_self_approve: bool = False
 
+    # Whether this actor may apply a change immediately, with no review.
+    # Requires is_approver as well: applying is approving, just without the
+    # round trip, so it cannot be a lower bar than deciding someone else's
+    # request.
+    may_apply_directly: bool = False
+
 
 class ChangeWorkflow:
     def __init__(self, database: Database) -> None:
@@ -116,6 +122,12 @@ class ChangeWorkflow:
             "can_submit": self._can_edit(actor, request)
                           and bool(self._changes.list_items(request_id)),
             "can_decide": request["status"] == SUBMITTED and actor.is_approver,
+            "can_apply": (
+                self._can_edit(actor, request)
+                and actor.is_approver
+                and actor.may_apply_directly
+                and bool(self._changes.list_items(request_id))
+            ),
         }
 
     def list_requests(self, status: str | None = None, document_id: int | None = None,
@@ -231,8 +243,8 @@ class ChangeWorkflow:
         change: the allowlist, the row-targeting rules, the duplicate guard,
         and capturing the staged value as it is right now.
         """
-        request = self._require_editable(actor, request_id)
-        document_ids = {int(p["document_id"]) for p in proposals}
+        # Shape checks before anything else: cheap, and they do not need a
+        # database round trip to fail.
         if not proposals:
             raise ValidationError("No changes were supplied.")
         if len(proposals) > _MAX_BULK_ITEMS:
@@ -240,11 +252,9 @@ class ChangeWorkflow:
                 f"That is {len(proposals)} changes in one request. "
                 f"Split it into batches of {_MAX_BULK_ITEMS} or fewer."
             )
-
-        # A bulk edit spans specs, so the request's own document_id cannot
-        # describe it. It is recorded per item instead; the request is just
-        # the container.
-        del request, document_ids
+        # A bulk edit spans specs, so the request's own document_id does not
+        # describe it; each item records its own. The request is the container.
+        self._require_editable(actor, request_id)
 
         added: list[Row] = []
         with self._db.transaction():
@@ -308,6 +318,43 @@ class ChangeWorkflow:
             )
 
     # -- transitions -------------------------------------------------------------------
+
+    def apply_directly(self, actor: Actor, request_id: int,
+                       comment: str | None = None) -> Row:
+        """Take a draft straight to APPROVED, with no review step.
+
+        The same end state as submit-then-approve, reached in one transaction
+        by someone authorised to skip the round trip. It is not a different
+        kind of change: the items, the captured original values and the
+        overlay behave identically, and everything is still recorded.
+
+        What differs is the audit trail. The event is APPLIED rather than
+        SUBMITTED + APPROVED, so a change nobody else reviewed is visibly
+        distinct from one that was -- which is the whole point of letting the
+        two coexist. Nothing reconstructs a review that did not happen.
+        """
+        request = self._require_editable(actor, request_id)
+        if not actor.is_approver or not actor.may_apply_directly:
+            raise PermissionDenied(
+                "You are not authorised to apply changes without review."
+            )
+        if not self._changes.list_items(request_id):
+            raise WorkflowError("A change request needs at least one change before it is applied.")
+
+        request_id = int(request["request_id"])
+        from_status = request["status"]
+        with self._db.transaction():
+            # Recorded as submitted by the same person, because they are: the
+            # submitter and the decider are one actor here, and leaving
+            # submitted_by empty would make the row look half-filled.
+            self._changes.update_request_status(request_id, SUBMITTED, actor.email)
+            self._changes.update_request_status(request_id, APPROVED, actor.email, comment)
+            self._changes.add_event(
+                request_id, "APPLIED", actor.email,
+                from_status=from_status, to_status=APPROVED,
+                comment=comment or "Applied without review",
+            )
+        return self.get_request(actor, request_id)
 
     def submit(self, actor: Actor, request_id: int) -> Row:
         request = self._require_editable(actor, request_id)

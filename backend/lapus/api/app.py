@@ -106,7 +106,14 @@ def create_app() -> FastAPI:
                 "staging_is_readonly": deps.staging_is_protected(),
                 "document_count": database.scalar("SELECT COUNT(*) FROM t00_documents"),
             },
-            "user": {"email": actor.email, "is_approver": actor.is_approver},
+            "user": {
+                "email": actor.email,
+                "is_approver": actor.is_approver,
+                # The UI offers Apply mode only when the server actually
+                # permits it, rather than offering it and failing at the
+                # last step.
+                "may_apply_directly": actor.may_apply_directly,
+            },
         }
 
     _mount_frontend(app)

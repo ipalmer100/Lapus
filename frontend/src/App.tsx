@@ -127,6 +127,20 @@ export function App() {
 
           <span className="tab-spacer" />
           <ThemeToggle />
+          {/* Which mode the server actually permits. Deliberately not a
+              control the user flips: a mode anyone can select for themselves
+              is not a control at all, so this reports configuration rather
+              than offering a choice. */}
+          <span
+            className={health?.user?.may_apply_directly ? 'chip chip-warn' : 'chip'}
+            title={
+              health?.user?.may_apply_directly
+                ? 'Changes may be applied immediately, without review'
+                : 'Changes are proposed and must be reviewed before they take effect'
+            }
+          >
+            {health?.user?.may_apply_directly ? 'apply enabled' : 'review required'}
+          </span>
           {health?.database?.staging_is_readonly && (
             <span
               className="chip chip-ok"
