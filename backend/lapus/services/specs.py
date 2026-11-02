@@ -12,7 +12,7 @@ from ..catalog import load_sections, section_by_number
 from ..db.engine import Database
 from ..repositories.changes import ChangeRepository
 from ..repositories.specs import SearchQuery, SpecRepository
-from .overlay import index_approved_items, render_section
+from .overlay import build_field, index_approved_items, render_section
 
 
 class SpecNotFound(RuntimeError):
@@ -92,6 +92,57 @@ class SpecService:
             render_section(section, self._specs.section_rows(document_id, section), approved)
             for section in load_sections()
         ]
+
+    def get_section_grid(self, section_number: int, query: SearchQuery) -> dict[str, Any]:
+        """One section across every spec in scope, for bulk editing.
+
+        Overlays are applied here exactly as they are for a single spec, so a
+        value already carrying an approved change shows as such in the grid
+        rather than looking like untouched source data.
+        """
+        section = section_by_number(section_number)
+        rows, total = self._specs.section_grid(section, query)
+
+        approved = index_approved_items(
+            self._changes.approved_items_for_documents(
+                sorted({int(row["document_id"]) for row in rows})
+            )
+        )
+
+        fields = list(section.editable_fields)
+        grid_rows: list[dict[str, Any]] = []
+        for row in rows:
+            record_id = int(row["id"]) if section.is_repeating and row.get("id") is not None else None
+            grid_rows.append({
+                "document_id": row["document_id"],
+                "record_id": record_id,
+                "filename": row.get("doc_filename"),
+                "is_present": row.get("doc_is_present"),
+                "customer": row.get("doc_customer"),
+                "spec_number": row.get("doc_spec_number"),
+                "item": row.get("doc_item"),
+                "fields": {
+                    field: build_field(row.get(field), approved.get((section.table, record_id, field)))
+                    for field in fields
+                },
+            })
+
+        return {
+            "section": {
+                "number": section.number,
+                "key": section.key,
+                "label": section.label,
+                "table": section.table,
+                "is_repeating": section.is_repeating,
+                "is_editable": section.is_editable,
+            },
+            "fields": fields,
+            "rows": grid_rows,
+            "total": total,
+            "limit": query.limit,
+            "offset": query.offset,
+            "has_more": query.offset + len(grid_rows) < total,
+        }
 
     def get_change_history(self, document_id: int) -> dict[str, Any]:
         if not self._specs.document_exists(document_id):

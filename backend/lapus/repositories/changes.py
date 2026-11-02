@@ -151,23 +151,27 @@ class ChangeRepository:
             (request_id,),
         )
 
-    def find_duplicate_item(self, request_id: int, target_table: str,
+    def find_duplicate_item(self, request_id: int, document_id: int, target_table: str,
                             target_record_id: int | None, target_field: str) -> Row | None:
         """Whether this request already proposes something for this exact field.
+
+        Scoped to the document as well as the field. A bulk edit sets the same
+        field across many specs, and without the document in the key the second
+        spec looks like a duplicate of the first.
 
         NULL record ids need `IS NULL` rather than `= ?`, so the two cases are
         separate statements -- the same split the unique indexes make.
         """
         if target_record_id is None:
             return self._db.query_one(
-                f"{_ITEM_SELECT} WHERE request_id = ? AND target_table = ? "
-                "AND target_record_id IS NULL AND target_field = ?",
-                (request_id, target_table, target_field),
+                f"{_ITEM_SELECT} WHERE request_id = ? AND target_document_id = ? "
+                "AND target_table = ? AND target_record_id IS NULL AND target_field = ?",
+                (request_id, document_id, target_table, target_field),
             )
         return self._db.query_one(
-            f"{_ITEM_SELECT} WHERE request_id = ? AND target_table = ? "
-            "AND target_record_id = ? AND target_field = ?",
-            (request_id, target_table, target_record_id, target_field),
+            f"{_ITEM_SELECT} WHERE request_id = ? AND target_document_id = ? "
+            "AND target_table = ? AND target_record_id = ? AND target_field = ?",
+            (request_id, document_id, target_table, target_record_id, target_field),
         )
 
     def update_item(self, item_id: int, proposed_value: str | None, clears_value: bool,
@@ -231,6 +235,31 @@ class ChangeRepository:
             ORDER BY r.decided_at, r.request_id, i.item_id
             """,
             (document_id,),
+        )
+
+    def approved_items_for_documents(self, document_ids: list[int]) -> list[Row]:
+        """Approved items across many specs, for the mass-edit grid.
+
+        One query rather than one per row: a grid page is hundreds of specs,
+        and asking per spec is the difference between one round trip and
+        hundreds.
+        """
+        if not document_ids:
+            return []
+        placeholders = ", ".join("?" for _ in document_ids)
+        return self._db.query(
+            f"""
+            SELECT i.item_id, i.target_document_id, i.section_number, i.target_table,
+                   i.target_record_id, i.target_field, i.original_value,
+                   i.proposed_value, i.clears_value, i.change_comment,
+                   i.created_by, i.created_at,
+                   r.request_id, r.title, r.decided_by, r.decided_at
+            FROM lapus.change_item i
+            JOIN lapus.change_request r ON r.request_id = i.request_id
+            WHERE i.target_document_id IN ({placeholders}) AND r.status = 'APPROVED'
+            ORDER BY r.decided_at, r.request_id, i.item_id
+            """,
+            document_ids,
         )
 
     def history_for_document(self, document_id: int) -> list[Row]:

@@ -40,6 +40,11 @@ _ALLOWED: dict[str, set[str]] = {
 # Statuses whose items may still be edited.
 _EDITABLE_STATUSES = {DRAFT}
 
+# A ceiling on one bulk edit. Not a technical limit -- it is a prompt to think.
+# A change request a reviewer cannot actually read is not governance, and a
+# five-figure batch is usually a filter that was wider than intended.
+_MAX_BULK_ITEMS = 500
+
 
 class WorkflowError(RuntimeError):
     """A workflow rule was broken. Maps to HTTP 409."""
@@ -143,8 +148,26 @@ class ChangeWorkflow:
         can see whether the source has moved underneath them.
         """
         request = self._require_editable(actor, request_id)
-        document_id = int(request["document_id"])
+        with self._db.transaction():
+            item = self._add_item_unlocked(
+                actor, request_id, int(request["document_id"]), section_number,
+                target_record_id, target_field, proposed_value, clears_value, comment,
+            )
+            self._changes.add_event(
+                request_id, "ITEM_ADDED", actor.email,
+                comment=f"{section_by_number(section_number).label}: {target_field}",
+            )
+        return item
 
+    def _add_item_unlocked(self, actor: Actor, request_id: int, document_id: int,
+                           section_number: int, target_record_id: int | None,
+                           target_field: str, proposed_value: str | None,
+                           clears_value: bool, comment: str | None) -> Row:
+        """Validate and insert one change item. Caller owns the transaction.
+
+        Shared by the single-field drawer and the mass-edit grid so a bulk edit
+        can never apply looser rules than a one-at-a-time change.
+        """
         section = section_by_number(section_number)
         try:
             validate_target(section.table, target_field)
@@ -177,7 +200,7 @@ class ChangeWorkflow:
             raise ValidationError("The proposed value is the same as the current value.")
 
         duplicate = self._changes.find_duplicate_item(
-            request_id, section.table, target_record_id, target_field
+            request_id, document_id, section.table, target_record_id, target_field
         )
         if duplicate is not None:
             raise WorkflowError(
@@ -185,21 +208,67 @@ class ChangeWorkflow:
                 "Edit the existing item instead."
             )
 
-        with self._db.transaction():
-            item_id = self._changes.add_item(
-                request_id, document_id, section.number, section.table, target_record_id,
-                target_field, None if original is None else str(original),
-                proposed_value, clears_value, comment, actor.email,
-            )
-            self._changes.add_event(
-                request_id, "ITEM_ADDED", actor.email,
-                comment=f"{section.label}: {target_field}",
-            )
-            self._changes.update_request_status(request_id, DRAFT, actor.email)
+        item_id = self._changes.add_item(
+            request_id, document_id, section.number, section.table, target_record_id,
+            target_field, None if original is None else str(original),
+            proposed_value, clears_value, comment, actor.email,
+        )
+        self._changes.update_request_status(request_id, DRAFT, actor.email)
         item = self._changes.get_item(item_id)
         if item is None:  # pragma: no cover - the insert just succeeded
             raise NotFound("The change item could not be read back.")
         return item
+
+    def add_items(self, actor: Actor, request_id: int, proposals: list[dict[str, Any]]) -> dict[str, Any]:
+        """Attach many field-level proposals at once, for a bulk edit.
+
+        All or nothing. A grid edit is one intention -- "set this supplier
+        across these forty specs" -- and a partial result would leave the user
+        reading a change request to work out which forty-first row silently did
+        not take. A single failure rolls the whole batch back and names the row.
+
+        Each proposal goes through exactly the same validation as a single
+        change: the allowlist, the row-targeting rules, the duplicate guard,
+        and capturing the staged value as it is right now.
+        """
+        request = self._require_editable(actor, request_id)
+        document_ids = {int(p["document_id"]) for p in proposals}
+        if not proposals:
+            raise ValidationError("No changes were supplied.")
+        if len(proposals) > _MAX_BULK_ITEMS:
+            raise ValidationError(
+                f"That is {len(proposals)} changes in one request. "
+                f"Split it into batches of {_MAX_BULK_ITEMS} or fewer."
+            )
+
+        # A bulk edit spans specs, so the request's own document_id cannot
+        # describe it. It is recorded per item instead; the request is just
+        # the container.
+        del request, document_ids
+
+        added: list[Row] = []
+        with self._db.transaction():
+            for index, proposal in enumerate(proposals, start=1):
+                try:
+                    added.append(
+                        self._add_item_unlocked(
+                            actor, request_id,
+                            int(proposal["document_id"]),
+                            int(proposal["section_number"]),
+                            proposal.get("target_record_id"),
+                            str(proposal["target_field"]),
+                            proposal.get("proposed_value"),
+                            bool(proposal.get("clears_value", False)),
+                            proposal.get("change_comment"),
+                        )
+                    )
+                except (ValidationError, WorkflowError) as exc:
+                    raise type(exc)(f"Change {index} of {len(proposals)}: {exc}") from exc
+            self._changes.add_event(
+                request_id, "ITEMS_ADDED", actor.email,
+                comment=f"{len(added)} changes added from a bulk edit",
+            )
+        return {"added": len(added), "items": added}
 
     def update_item(self, actor: Actor, request_id: int, item_id: int,
                     proposed_value: str | None, clears_value: bool,

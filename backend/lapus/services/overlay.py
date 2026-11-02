@@ -27,8 +27,13 @@ from ..db.engine import Row
 _IDENTITY_COLUMNS = {"id", "document_id", "source_table_index", "source_row"}
 
 
-def _field(value: Any, override: Row | None) -> dict[str, Any]:
-    """Package one field value with its provenance."""
+def build_field(value: Any, override: Row | None) -> dict[str, Any]:
+    """Package one field value with its provenance.
+
+    Public because both the single-spec view and the mass-edit grid render
+    fields, and both must package them identically -- a grid cell that lost
+    the source value would be exactly the regression this shape prevents.
+    """
     source_value = value
     if override is None:
         return {
@@ -99,7 +104,7 @@ def render_section(section: Section, rows: list[Row],
                 identity[column] = value
                 continue
             override = approved.get((section.table, record_id, column))
-            fields[column] = _field(value, override)
+            fields[column] = build_field(value, override)
 
         rendered_rows.append({
             "record_id": record_id,

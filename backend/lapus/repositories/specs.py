@@ -205,6 +205,56 @@ class SpecRepository:
     def section_rows_by_number(self, document_id: int, number: int) -> list[Row]:
         return self.section_rows(document_id, section_by_number(number))
 
+    # -- one section across many specs (mass edit) ------------------------------
+
+    def section_grid(self, section: Section, query: SearchQuery) -> tuple[list[Row], int]:
+        """One section's rows for every spec matching a search.
+
+        The same predicates as `search`, deliberately: what the specification
+        list shows filtered is exactly what a bulk edit can reach. A grid whose
+        scope differs from the list the user was just looking at is how a mass
+        edit quietly touches a spec that was meant to be out of scope.
+        """
+        where, params = self._search_predicates(query)
+        # Only specs that actually hold this section; a spec with no row here
+        # has nothing to edit and would be an empty line in the grid.
+        where.append(f"EXISTS (SELECT 1 FROM {section.table} x WHERE x.document_id = d.id)")
+        clause = f" WHERE {' AND '.join(where)}"
+
+        total = self._db.scalar(
+            "SELECT COUNT(*) FROM t00_documents d "
+            f"LEFT JOIN t01_product_description p ON p.document_id = d.id{clause}",
+            params,
+        )
+
+        # Section columns come from the allowlist; identity columns are aliased
+        # so a section that *is* t01_product_description cannot collide with
+        # the header join.
+        columns = ", ".join(f"s.{column}" for column in readable_columns(section))
+        order = "s.source_row, s.id" if section.is_repeating else "d.id"
+        rows = self._db.query(
+            f"""
+            SELECT d.id AS document_id,
+                   d.filename AS doc_filename,
+                   d.is_present AS doc_is_present,
+                   p.customer AS doc_customer,
+                   p.spec_number AS doc_spec_number,
+                   p.item AS doc_item,
+                   {columns}
+            FROM t00_documents d
+            LEFT JOIN t01_product_description p ON p.document_id = d.id
+            JOIN {section.table} s ON s.document_id = d.id
+            {clause}
+            ORDER BY CASE WHEN COALESCE(p.customer, '') = '' THEN 1 ELSE 0 END,
+                     p.customer,
+                     CASE WHEN COALESCE(p.spec_number, '') = '' THEN 1 ELSE 0 END,
+                     p.spec_number, d.filename, d.id, {order}
+            LIMIT ? OFFSET ?
+            """,
+            [*params, max(1, min(query.limit, 500)), max(0, query.offset)],
+        )
+        return rows, int(total or 0)
+
     def document_exists(self, document_id: int) -> bool:
         return bool(
             self._db.scalar("SELECT COUNT(*) FROM t00_documents WHERE id = ?", (document_id,))

@@ -51,6 +51,20 @@ class CreateItem(BaseModel):
     change_comment: str | None = None
 
 
+class BulkItem(BaseModel):
+    document_id: int
+    section_number: int = Field(ge=1, le=11)
+    target_record_id: int | None = None
+    target_field: str = Field(min_length=1, max_length=64)
+    proposed_value: str | None = None
+    clears_value: bool = False
+    change_comment: str | None = None
+
+
+class BulkItems(BaseModel):
+    items: list[BulkItem] = Field(min_length=1, max_length=500)
+
+
 class UpdateItem(BaseModel):
     proposed_value: str | None = None
     clears_value: bool = False
@@ -123,6 +137,17 @@ def add_item(request_id: int, body: CreateItem, workflow: Workflow,
             actor, request_id, body.section_number, body.target_record_id,
             body.target_field, body.proposed_value, body.clears_value,
             body.change_comment,
+        )
+    )
+
+
+@router.post("/{request_id}/items/bulk", status_code=201)
+def add_items(request_id: int, body: BulkItems, workflow: Workflow,
+              actor: CurrentActor) -> dict[str, Any]:
+    """Add a grid's worth of changes in one transaction, all or nothing."""
+    return _handle(
+        lambda: workflow.add_items(
+            actor, request_id, [item.model_dump() for item in body.items]
         )
     )
 

@@ -58,6 +58,34 @@ def list_sections() -> list[dict[str, Any]]:
     ]
 
 
+@router.get("/grid/{section_number}")
+def get_section_grid(
+    section_number: int,
+    service: Service,
+    q: str | None = None,
+    customer: str | None = None,
+    raw_material: str | None = None,
+    include_missing: bool = False,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    """One section across every specification in scope, for bulk editing.
+
+    Deliberately under /specs with a literal prefix rather than a bare path
+    segment, so it cannot be shadowed by /specs/{document_id}.
+    """
+    try:
+        return service.get_section_grid(
+            section_number,
+            SearchQuery(
+                text=q, customer=customer, raw_material=raw_material,
+                include_missing=include_missing, limit=limit, offset=offset,
+            ),
+        )
+    except UnknownTarget as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/{document_id}")
 def get_spec(document_id: int, service: Service) -> dict[str, Any]:
     try:

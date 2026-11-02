@@ -178,3 +178,127 @@ def test_later_approval_wins_for_the_same_field(workflow, actor, first_document_
         workflow.approve(actor, rid, None)
     field = specs.get_section(first_document_id, 3)["rows"][0]["fields"]["supplier"]
     assert field["value"] == "Second Co"
+
+
+# --- bulk editing ---------------------------------------------------------
+
+
+def _grid_docs(database, limit: int = 6) -> list[int]:
+    from lapus.repositories.specs import SearchQuery
+    from lapus.services.specs import SpecService
+
+    grid = SpecService(database).get_section_grid(7, SearchQuery(limit=limit))
+    return [row["document_id"] for row in grid["rows"]]
+
+
+def _proposal(document_id: int, value: str = "Required - 2 per core") -> dict:
+    return {
+        "document_id": document_id, "section_number": 7, "target_record_id": None,
+        "target_field": "core_tags", "proposed_value": value,
+        "clears_value": False, "change_comment": "Standardised",
+    }
+
+
+def test_bulk_edit_spans_many_specs_in_one_request(workflow, actor, database) -> None:
+    """The case single-spec editing never exercised.
+
+    target_record_id is NULL for a single-record section, so a duplicate guard
+    keyed only on (request, table, field) treats the second spec as a repeat of
+    the first -- which made a bulk edit fail on its second row.
+    """
+    documents = _grid_docs(database)
+    assert len(documents) > 1
+    request = workflow.create_request(actor, documents[0], "Bulk core tags", None)
+    request_id = int(request["request_id"])
+
+    result = workflow.add_items(actor, request_id, [_proposal(d) for d in documents])
+
+    assert result["added"] == len(documents)
+    detail = workflow.get_request(actor, request_id)
+    assert {int(i["target_document_id"]) for i in detail["items"]} == set(documents)
+
+
+def test_bulk_edit_still_refuses_a_real_duplicate(workflow, actor, database) -> None:
+    """Two proposals for the same field of the same spec remain a conflict."""
+    documents = _grid_docs(database, limit=3)
+    request = workflow.create_request(actor, documents[0], "Bulk", None)
+    request_id = int(request["request_id"])
+    workflow.add_items(actor, request_id, [_proposal(d) for d in documents])
+
+    with pytest.raises(WorkflowError, match="already proposes"):
+        workflow.add_items(actor, request_id, [_proposal(documents[0], "Something else")])
+
+
+def test_bulk_edit_is_all_or_nothing(workflow, actor, database) -> None:
+    """One bad row rolls the whole batch back, and the message says which.
+
+    A partial apply would leave someone reading a change request to work out
+    which row silently did not take.
+    """
+    documents = _grid_docs(database, limit=4)
+    request = workflow.create_request(actor, documents[0], "Bulk", None)
+    request_id = int(request["request_id"])
+
+    proposals = [_proposal(d) for d in documents]
+    proposals[2]["target_field"] = "not_a_real_column"
+
+    with pytest.raises(ValidationError, match="Change 3 of 4"):
+        workflow.add_items(actor, request_id, proposals)
+
+    assert workflow.get_request(actor, request_id)["items"] == []
+
+
+def test_bulk_edit_captures_each_spec_own_staged_value(workflow, actor, database) -> None:
+    """original_value is per spec, not copied from the first row."""
+    from lapus.repositories.specs import SearchQuery
+    from lapus.services.specs import SpecService
+
+    grid = SpecService(database).get_section_grid(7, SearchQuery(limit=5))
+    staged = {r["document_id"]: r["fields"]["slit_width"]["value"] for r in grid["rows"]}
+
+    request = workflow.create_request(actor, next(iter(staged)), "Bulk widths", None)
+    request_id = int(request["request_id"])
+    workflow.add_items(actor, request_id, [
+        {"document_id": d, "section_number": 7, "target_record_id": None,
+         "target_field": "slit_width", "proposed_value": "99.000\"",
+         "clears_value": False, "change_comment": None}
+        for d in staged
+    ])
+
+    for item in workflow.get_request(actor, request_id)["items"]:
+        assert item["original_value"] == staged[int(item["target_document_id"])]
+
+
+def test_bulk_edit_enforces_the_allowlist(workflow, actor, database) -> None:
+    """A grid edit cannot reach a field a single edit could not."""
+    documents = _grid_docs(database, limit=2)
+    request = workflow.create_request(actor, documents[0], "Bulk", None)
+    request_id = int(request["request_id"])
+
+    with pytest.raises(ValidationError):
+        workflow.add_items(actor, request_id, [{
+            "document_id": documents[0], "section_number": 11, "target_record_id": 1,
+            "target_field": "revision", "proposed_value": "rewritten",
+            "clears_value": False, "change_comment": None,
+        }])
+
+
+def test_bulk_edit_requires_a_draft(workflow, actor, database) -> None:
+    documents = _grid_docs(database, limit=2)
+    request = workflow.create_request(actor, documents[0], "Bulk", None)
+    request_id = int(request["request_id"])
+    workflow.add_items(actor, request_id, [_proposal(d) for d in documents])
+    workflow.submit(actor, request_id)
+
+    with pytest.raises(WorkflowError, match="no longer be edited"):
+        workflow.add_items(actor, request_id, [_proposal(documents[0], "After submit")])
+
+
+def test_bulk_edit_has_a_ceiling(workflow, actor, database) -> None:
+    """A batch a reviewer could not read is not governance."""
+    documents = _grid_docs(database, limit=2)
+    request = workflow.create_request(actor, documents[0], "Bulk", None)
+    request_id = int(request["request_id"])
+
+    with pytest.raises(ValidationError, match="Split it into batches"):
+        workflow.add_items(actor, request_id, [_proposal(documents[0])] * 501)

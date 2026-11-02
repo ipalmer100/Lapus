@@ -89,9 +89,11 @@ CREATE INDEX IF NOT EXISTS ix_lapus_change_event_request ON lapus.change_event(r
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_lapus_change_item_row_target ON lapus.change_item(request_id, target_table, target_record_id, target_field) WHERE target_record_id IS NOT NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_lapus_change_item_doc_target ON lapus.change_item(request_id, target_table, target_field) WHERE target_record_id IS NULL;
+DROP INDEX IF EXISTS lapus.ux_lapus_change_item_doc_target;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_lapus_change_item_doc_target_v2 ON lapus.change_item(request_id, target_document_id, target_table, target_field) WHERE target_record_id IS NULL;
 
 -- Record the schema version the application expects.
 INSERT INTO lapus.schema_version (version)
-SELECT 1
+SELECT 2
 WHERE NOT EXISTS (SELECT 1 FROM lapus.schema_version);

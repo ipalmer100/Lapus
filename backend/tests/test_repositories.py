@@ -143,3 +143,54 @@ def test_blank_specs_are_still_returned(database) -> None:
     assert total == database.scalar(
         "SELECT COUNT(*) FROM t00_documents WHERE is_present = 1"
     )
+
+
+def test_section_grid_scope_matches_the_spec_list(database) -> None:
+    """What the list shows filtered is exactly what a bulk edit can reach.
+
+    A grid whose scope differed from the list the user was just looking at is
+    how a mass edit quietly touches a spec meant to be out of scope.
+    """
+    from lapus.services.specs import SpecService
+
+    service = SpecService(database)
+    for query in (SearchQuery(), SearchQuery(text='Meridian'), SearchQuery(customer='Cascade')):
+        listed = {r["document_id"] for r in service.search(query)["results"]}
+        grid = {r["document_id"] for r in service.get_section_grid(7, query)["rows"]}
+        # Every spec in the grid was in the list; the grid may hold fewer, as
+        # it only covers specs that actually have the section.
+        assert grid <= listed, f"grid reached beyond the list for {query}"
+
+
+def test_section_grid_applies_overlays(database) -> None:
+    from lapus.services.change_workflow import Actor, ChangeWorkflow
+    from lapus.services.specs import SpecService
+
+    service = SpecService(database)
+    actor = Actor(email="tester@example.com", is_approver=True, may_self_approve=True)
+    workflow = ChangeWorkflow(database)
+
+    document_id = service.get_section_grid(7, SearchQuery(limit=1))["rows"][0]["document_id"]
+    request = workflow.create_request(actor, document_id, "Overlay in grid", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(actor, request_id, 7, None, "core_tags", "Grid overlay", False, None)
+    workflow.submit(actor, request_id)
+    workflow.approve(actor, request_id, None)
+
+    row = next(
+        r for r in service.get_section_grid(7, SearchQuery(limit=200))["rows"]
+        if r["document_id"] == document_id
+    )
+    field = row["fields"]["core_tags"]
+    assert field["value"] == "Grid overlay"
+    assert field["is_overridden"] is True
+    assert field["source_value"] != "Grid overlay", "the staged value must still be shown"
+
+
+def test_repeating_section_grid_carries_record_ids(database) -> None:
+    """BOM rows need their source primary key or a bulk edit cannot target them."""
+    from lapus.services.specs import SpecService
+
+    rows = SpecService(database).get_section_grid(3, SearchQuery(limit=10))["rows"]
+    assert rows
+    assert all(r["record_id"] is not None for r in rows)

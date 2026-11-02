@@ -19,7 +19,7 @@ from __future__ import annotations
 from .dialect import Dialect
 from .engine import Database, DatabaseError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _statements(dialect: Dialect) -> list[str]:
@@ -120,9 +120,16 @@ def _statements(dialect: Dialect) -> list[str]:
             "request_id, target_table, target_record_id, target_field",
             unique=True, where="target_record_id IS NOT NULL",
         ),
+        # Superseded in schema version 2: the original omitted
+        # target_document_id, so within one request only a single spec could
+        # carry a change to a given single-record field -- which made a bulk
+        # edit across specs collide with itself on its second row. Dropped by
+        # name because CREATE ... IF NOT EXISTS will not redefine an index
+        # that already exists under the old definition.
+        "DROP INDEX IF EXISTS lapus.ux_lapus_change_item_doc_target",
         dialect.create_index(
-            "ux_lapus_change_item_doc_target", "change_item",
-            "request_id, target_table, target_field",
+            "ux_lapus_change_item_doc_target_v2", "change_item",
+            "request_id, target_document_id, target_table, target_field",
             unique=True, where="target_record_id IS NULL",
         ),
     ]
