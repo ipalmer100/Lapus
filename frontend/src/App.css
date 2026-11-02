@@ -636,3 +636,56 @@ tr:hover .cell-propose, .field-pair:hover .propose-button { opacity: 1; }
 
 .startup-error { max-width: 560px; margin: 70px auto; padding: 20px; }
 .startup-error code { background: var(--bg-hover); padding: 1px 5px; border-radius: 4px; }
+
+/* --- mass edit ------------------------------------------------------------ */
+
+.mass-edit { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+
+.mass-edit-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.mass-edit-bar .sidebar-select { margin: 0; }
+
+.mass-edit-target {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar); flex-shrink: 0;
+}
+.mass-edit-target .drawer-title-input { padding: 4px 8px; font-size: 12px; min-width: 220px; }
+.mass-edit-note { font-size: 11.5px; }
+
+.mass-edit-scroll { flex: 1; overflow: auto; }
+
+.mass-edit-table { font-size: 12.5px; }
+.mass-edit-table thead th {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+/* The spec name stays put while the fields scroll sideways -- a grid of
+   values with no way to tell which spec a row belongs to is unusable. */
+.mass-edit-table .sticky-col {
+  position: sticky; left: 0; z-index: 2;
+  background: var(--bg); font-weight: 550; white-space: nowrap;
+}
+.mass-edit-table thead .sticky-col { z-index: 4; }
+.mass-edit-table tbody tr:hover .sticky-col { background: var(--bg-hover); }
+.mass-edit-table td { position: relative; }
+
+.cell-editor {
+  width: 100%; min-width: 110px; font: inherit; padding: 2px 5px;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg); color: var(--text);
+}
+.cell-editor:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+/* An edited cell, still unwritten. */
+.cell-dirty .cell-editor { border-color: var(--overlay); background: var(--overlay-soft); }
+.cell-in-fill { outline: 1px dashed var(--accent); outline-offset: -1px; }
+
+.fill-handle {
+  position: absolute; right: 2px; bottom: 2px;
+  width: 7px; height: 7px; background: var(--accent);
+  border-radius: 1px; cursor: ns-resize; opacity: 0;
+}
+td:hover .fill-handle, .cell-dirty .fill-handle { opacity: 1; }

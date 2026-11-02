@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { api, ApiError, type SearchParams } from '../api/client'
-import type { SpecSummary } from '../types'
+import type { SpecFilter, SpecSummary } from '../types'
 import { blank } from '../display'
 
 const PAGE = 100
@@ -28,12 +28,20 @@ interface Props {
   onSelect: (documentId: number) => void
   documentCount: number | null
   refreshToken: number
+  // Held above this component so the mass-edit grid is filtered by the same
+  // thing: a bulk edit must not reach a spec the list has filtered away.
+  filter: SpecFilter
+  onFilterChange: (next: SpecFilter) => void
 }
 
-export function SpecSidebar({ selectedId, onSelect, documentCount, refreshToken }: Props) {
-  const [query, setQuery] = useState('')
-  const [material, setMaterial] = useState('')
-  const [includeMissing, setIncludeMissing] = useState(false)
+export function SpecSidebar({
+  selectedId, onSelect, documentCount, refreshToken, filter, onFilterChange,
+}: Props) {
+  const { query, material, includeMissing } = filter
+  const setQuery = (value: string) => onFilterChange({ ...filter, query: value })
+  const setMaterial = (value: string) => onFilterChange({ ...filter, material: value })
+  const setIncludeMissing = (value: boolean) =>
+    onFilterChange({ ...filter, includeMissing: value })
   const [rows, setRows] = useState<SpecSummary[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)

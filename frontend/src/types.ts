@@ -107,6 +107,19 @@ export interface Section {
   override_count: number
 }
 
+/** The section contract as /api/specs/sections returns it: the definition
+ *  only, with no spec's data attached. Distinct from `Section`, which carries
+ *  the rows for one specification. */
+export interface SectionMeta {
+  number: number
+  key: string
+  label: string
+  layout: string
+  is_repeating: boolean
+  is_editable: boolean
+  editable_fields: string[]
+}
+
 export type ChangeStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
 
 export interface ChangeItem {
@@ -253,4 +266,54 @@ export interface ChangeTarget {
   fieldLabel: string
   currentValue: string | null
   rowDescription: string | null
+}
+
+/** The spec filter, shared by the sidebar and the mass-edit grid.
+ *
+ * Lifted out of the sidebar deliberately: Cobalt's rule is that a fill or a
+ * mass edit cannot touch a spec that is out of scope, and that only holds if
+ * both views are filtered by the same thing. */
+export interface SpecFilter {
+  query: string
+  material: string
+  includeMissing: boolean
+}
+
+export interface GridRow {
+  document_id: number
+  record_id: number | null
+  filename: string | null
+  is_present: number
+  customer: string | null
+  spec_number: string | null
+  item: string | null
+  fields: Record<string, FieldValue>
+}
+
+export interface SectionGrid {
+  section: {
+    number: number
+    key: string
+    label: string
+    table: string
+    is_repeating: boolean
+    is_editable: boolean
+  }
+  fields: string[]
+  rows: GridRow[]
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+/** One staged cell edit, before it becomes a change item. */
+export interface BulkProposal {
+  document_id: number
+  section_number: number
+  target_record_id: number | null
+  target_field: string
+  proposed_value: string | null
+  clears_value: boolean
+  change_comment: string | null
 }

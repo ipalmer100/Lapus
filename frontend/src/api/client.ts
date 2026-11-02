@@ -5,8 +5,9 @@
 // base URL is needed anywhere.
 
 import type {
-  AdminExceptions, AdminStagingStatus, ChangeRequestDetail, ChangeRequestSummary,
-  ChangeStatus, Health, SearchResponse, Section, SpecChangeHistory, SpecDetail,
+  AdminExceptions, AdminStagingStatus, BulkProposal, ChangeRequestDetail,
+  ChangeRequestSummary, ChangeStatus, Health, SearchResponse, Section,
+  SectionGrid, SectionMeta, SpecChangeHistory, SpecDetail,
 } from '../types'
 
 export class ApiError extends Error {
@@ -86,6 +87,19 @@ export const api = {
   // one request beats eleven.
   getAllSections: (documentId: number) =>
     request<Section[]>(`/api/specs/${documentId}/sections`),
+
+  // The section contract itself, so the frontend's section list comes from
+  // the same config file the backend validates against.
+  listSections: () => request<SectionMeta[]>('/api/specs/sections'),
+
+  // One section across every spec matching a search, for bulk editing.
+  getSectionGrid: (sectionNumber: number, params: SearchParams) =>
+    request<SectionGrid>(`/api/specs/grid/${sectionNumber}${queryString({ ...params })}`),
+
+  addItemsBulk: (requestId: number, items: BulkProposal[]) =>
+    request<{ added: number }>(`/api/change-requests/${requestId}/items/bulk`, {
+      method: 'POST', body: JSON.stringify({ items }),
+    }),
 
   getSpecHistory: (documentId: number) =>
     request<SpecChangeHistory>(`/api/specs/${documentId}/changes`),

@@ -6,21 +6,26 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { api } from './api/client'
-import type { ChangeRequestSummary, ChangeTarget, Health } from './types'
+import type { ChangeRequestSummary, ChangeTarget, Health, SectionMeta, SpecFilter } from './types'
 import { SpecSidebar } from './components/SpecSidebar'
 import { ThemeToggle } from './components/ThemeToggle'
 import { SpecWorkspace } from './features/spec-workspace/SpecWorkspace'
 import { ChangeRequestsPage } from './features/change-request/ChangeRequestsPage'
 import { ProposeChangeDrawer } from './features/change-request/ProposeChangeDrawer'
 import { ParserHealth } from './features/admin/ParserHealth'
+import { MassEditGrid } from './features/mass-edit/MassEditGrid'
 import './App.css'
 
-type Mode = 'specification' | 'requests' | 'admin'
+type Mode = 'specification' | 'mass-edit' | 'requests' | 'admin'
+
+const NO_FILTER: SpecFilter = { query: '', material: '', includeMissing: false }
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null)
   const [mode, setMode] = useState<Mode>('specification')
   const [documentId, setDocumentId] = useState<number | null>(null)
+  const [filter, setFilter] = useState<SpecFilter>(NO_FILTER)
+  const [sections, setSections] = useState<SectionMeta[]>([])
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null)
   const [target, setTarget] = useState<ChangeTarget | null>(null)
   const [drafts, setDrafts] = useState<ChangeRequestSummary[]>([])
@@ -32,6 +37,9 @@ export function App() {
 
   useEffect(() => {
     void api.health().then(setHealth).catch(() => setHealth(null))
+    // The section contract, so the grid's section list comes from the same
+    // config file the backend validates against.
+    void api.listSections().then(setSections).catch(() => setSections([]))
   }, [])
 
   const refreshRequests = useCallback(async () => {
@@ -77,6 +85,8 @@ export function App() {
         onSelect={openSpec}
         documentCount={health?.database?.document_count ?? null}
         refreshToken={refreshToken}
+        filter={filter}
+        onFilterChange={setFilter}
       />
 
       <div className="main-panel">
@@ -87,6 +97,14 @@ export function App() {
             onClick={() => setMode('specification')}
           >
             Specification
+          </button>
+          <button
+            type="button"
+            className={mode === 'mass-edit' ? 'active' : ''}
+            onClick={() => setMode('mass-edit')}
+            title="One section across every specification in scope"
+          >
+            Mass Edit
           </button>
           <button
             type="button"
@@ -163,6 +181,19 @@ export function App() {
           ) : (
             <div className="empty-state">Select a specification from the list.</div>
           ))}
+
+        {mode === 'mass-edit' && (
+          <MassEditGrid
+            filter={filter}
+            sections={sections}
+            openDrafts={drafts}
+            onStaged={(requestId) => {
+              setSelectedRequestId(requestId)
+              setMode('requests')
+              changed()
+            }}
+          />
+        )}
 
         {mode === 'requests' && (
           <ChangeRequestsPage
