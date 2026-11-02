@@ -66,26 +66,84 @@ def build_field(value: Any, override: Row | None) -> dict[str, Any]:
     }
 
 
-def index_approved_items(items: list[Row]) -> dict[tuple[str, int | None, str], Row]:
-    """Key approved change items by the exact field they target.
+# Two ways to find the change item for a row, in order of precision.
+#
+# By surrogate key, which is exact while it lasts:
+#     ("id", table, record_id, field)
+# By position in the source document, which outlives a reparse:
+#     ("src", table, document_id, source_table_index, source_row, field)
+IdKey = tuple[str, str, int | None, str]
+SourceKey = tuple[str, str, int, int, int, str]
+OverlayIndex = dict[tuple, Row]
+
+
+def index_approved_items(items: list[Row]) -> OverlayIndex:
+    """Key approved change items by the field they target, two ways.
 
     `items` arrives oldest-decision-first, so later approvals overwrite earlier
     ones for the same field and the most recent decision is what the user sees.
+
+    Both keys are stored because neither alone is sufficient. target_record_id
+    is exact, but the parser DELETEs and reinserts a document's rows on every
+    rerun and the surrogate key is regenerated -- so an overlay keyed only on
+    it silently stops applying after a reparse, which is precisely what
+    AGENTS.md rule 6 forbids. The row's position in the source document
+    survives that, and is used as the fallback.
     """
-    index: dict[tuple[str, int | None, str], Row] = {}
+    index: OverlayIndex = {}
     for item in items:
         record_id = item.get("target_record_id")
-        key = (
-            item["target_table"],
-            int(record_id) if record_id is not None else None,
-            item["target_field"],
-        )
-        index[key] = item
+        table = item["target_table"]
+        field = item["target_field"]
+        index[("id", table, int(record_id) if record_id is not None else None, field)] = item
+
+        table_index = item.get("target_source_table_index")
+        source_row = item.get("target_source_row")
+        if table_index is not None and source_row is not None:
+            index[(
+                "src", table, int(item["target_document_id"]),
+                int(table_index), int(source_row), field,
+            )] = item
     return index
 
 
+def find_override(index: OverlayIndex, table: str, record_id: int | None,
+                  field: str, row: Row, staged_value: Any) -> Row | None:
+    """The approved change for one rendered cell, if there is one.
+
+    Tries the surrogate key first. Falling back to the source position is
+    guarded by the captured original value: a reparse that only regenerated
+    ids leaves the staged value identical and the overlay reattaches, while a
+    reparse that actually changed the document leaves the overlay inert rather
+    than re-aiming an approved change at content nobody approved it for.
+    """
+    exact = index.get(("id", table, record_id, field))
+    if exact is not None:
+        return exact
+
+    table_index = row.get("source_table_index")
+    source_row = row.get("source_row")
+    document_id = row.get("document_id")
+    if table_index is None or source_row is None or document_id is None:
+        return None
+
+    candidate = index.get(
+        ("src", table, int(document_id), int(table_index), int(source_row), field)
+    )
+    if candidate is None:
+        return None
+
+    original = candidate.get("original_value")
+    current = None if staged_value is None else str(staged_value)
+    if original != current:
+        # The document moved on. Showing an approved value over content it was
+        # never approved against would be worse than showing nothing.
+        return None
+    return candidate
+
+
 def render_section(section: Section, rows: list[Row],
-                   approved: dict[tuple[str, int | None, str], Row]) -> dict[str, Any]:
+                   approved: OverlayIndex) -> dict[str, Any]:
     """Build the display payload for one section.
 
     Shape is stable whether or not the section has data: an absent section is
@@ -103,7 +161,7 @@ def render_section(section: Section, rows: list[Row],
             if column in _IDENTITY_COLUMNS:
                 identity[column] = value
                 continue
-            override = approved.get((section.table, record_id, column))
+            override = find_override(approved, section.table, record_id, column, row, value)
             fields[column] = build_field(value, override)
 
         rendered_rows.append({
@@ -131,6 +189,26 @@ def render_section(section: Section, rows: list[Row],
             1 for r in rendered_rows for f in r["fields"].values() if f["is_overridden"]
         ),
     }
+
+
+def source_coordinates(rows: list[Row], section: Section,
+                       record_id: int | None) -> tuple[int | None, int | None]:
+    """Where a targeted row sits in the source document.
+
+    Returns (None, None) for single-record sections: they are keyed on
+    document_id, which the parser preserves, so they never needed a fallback.
+    """
+    if not section.is_repeating:
+        return None, None
+    for row in rows:
+        if row.get("id") is not None and int(row["id"]) == record_id:
+            table_index = row.get("source_table_index")
+            source_row = row.get("source_row")
+            return (
+                int(table_index) if table_index is not None else None,
+                int(source_row) if source_row is not None else None,
+            )
+    return None, None
 
 
 def current_value(rows: list[Row], section: Section, record_id: int | None,

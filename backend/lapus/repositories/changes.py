@@ -27,7 +27,8 @@ _REQUEST_SUMMARY_SELECT = """
 
 _ITEM_SELECT = """
     SELECT item_id, request_id, target_document_id, section_number, target_table,
-           target_record_id, target_field, original_value, proposed_value,
+           target_record_id, target_source_table_index, target_source_row,
+           target_field, original_value, proposed_value,
            clears_value, change_comment, created_by, created_at, updated_at
     FROM lapus.change_item
 """
@@ -125,19 +126,23 @@ class ChangeRepository:
     # -- items ------------------------------------------------------------------
 
     def add_item(self, request_id: int, document_id: int, section_number: int,
-                 target_table: str, target_record_id: int | None, target_field: str,
-                 original_value: str | None, proposed_value: str | None,
-                 clears_value: bool, comment: str | None, actor: str) -> int:
+                 target_table: str, target_record_id: int | None,
+                 source_table_index: int | None, source_row: int | None,
+                 target_field: str, original_value: str | None,
+                 proposed_value: str | None, clears_value: bool,
+                 comment: str | None, actor: str) -> int:
         return self._db.insert_returning_id(
             """
             INSERT INTO lapus.change_item
                 (request_id, target_document_id, section_number, target_table,
-                 target_record_id, target_field, original_value, proposed_value,
+                 target_record_id, target_source_table_index, target_source_row,
+                 target_field, original_value, proposed_value,
                  clears_value, change_comment, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             "item_id",
             (request_id, document_id, section_number, target_table, target_record_id,
+             source_table_index, source_row,
              target_field, original_value, proposed_value, 1 if clears_value else 0,
              comment, actor),
         )
@@ -225,7 +230,8 @@ class ChangeRepository:
         """
         return self._db.query(
             """
-            SELECT i.item_id, i.section_number, i.target_table, i.target_record_id,
+            SELECT i.item_id, i.target_document_id, i.section_number, i.target_table,
+                   i.target_record_id, i.target_source_table_index, i.target_source_row,
                    i.target_field, i.original_value, i.proposed_value, i.clears_value,
                    i.change_comment, i.created_by, i.created_at,
                    r.request_id, r.title, r.decided_by, r.decided_at
@@ -250,7 +256,8 @@ class ChangeRepository:
         return self._db.query(
             f"""
             SELECT i.item_id, i.target_document_id, i.section_number, i.target_table,
-                   i.target_record_id, i.target_field, i.original_value,
+                   i.target_record_id, i.target_source_table_index, i.target_source_row,
+                   i.target_field, i.original_value,
                    i.proposed_value, i.clears_value, i.change_comment,
                    i.created_by, i.created_at,
                    r.request_id, r.title, r.decided_by, r.decided_at

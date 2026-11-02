@@ -19,6 +19,8 @@ from lapus.db.engine import Database, DatabaseError
 from lapus.db.sqlite_backend import staging_is_readonly
 from lapus.services.change_workflow import Actor, ChangeWorkflow
 
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 def staging_fingerprint(path: Path) -> str:
     """A checksum over every row of every parser-owned table.
@@ -138,3 +140,159 @@ def test_approved_change_does_not_alter_the_source_value(
     assert field["source_value"] == original, "the Word-source value must survive an approval"
     assert field["is_overridden"] is True
     assert field["provenance"]["original_value"] == original
+
+
+# --- surviving a parser rerun ---------------------------------------------
+
+
+def _reparse_document(staging_db: Path, document_id: int) -> None:
+    """Do to one document exactly what the parser does on a rerun.
+
+    From the V5.2 parser: DELETE FROM each of T01-T11 WHERE document_id = ?,
+    then reinsert from the Word file. The content is identical; the surrogate
+    ids are not.
+    """
+    connection = sqlite3.connect(staging_db)
+    try:
+        columns = (
+            "document_id, source_table_index, source_row, row_type, basis_weight, "
+            "basis_weight_range, caliper_mils, raw_material, supplier, raw_material_item_code"
+        )
+        rows = connection.execute(
+            f"SELECT {columns} FROM T03_Bill_of_Materials WHERE document_id = ?",
+            (document_id,),
+        ).fetchall()
+        connection.execute(
+            "DELETE FROM T03_Bill_of_Materials WHERE document_id = ?", (document_id,)
+        )
+        placeholders = ", ".join("?" for _ in columns.split(","))
+        connection.executemany(
+            f"INSERT INTO T03_Bill_of_Materials ({columns}) VALUES ({placeholders})", rows
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_approved_overlay_survives_a_parser_rerun(
+    tmp_path_factory, actor: Actor
+) -> None:
+    """AGENTS.md rule 6: a parser rerun must not destroy Lapus changes.
+
+    It used to. The parser regenerates the surrogate id of every repeating
+    row, and an overlay keyed only on target_record_id stopped matching --
+    so an approved change silently reverted to the staged value with nothing
+    to say it had. The change item survived; its effect did not.
+    """
+    import sys
+
+    from lapus.db.engine import connect
+    from lapus.db.migrations import apply_migrations
+    from lapus.repositories.specs import SearchQuery, SpecRepository
+    from lapus.services.change_workflow import ChangeWorkflow
+    from lapus.services.specs import SpecService
+
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    from make_demo_db import build as build_demo
+
+    directory = tmp_path_factory.mktemp("reparse")
+    staging = directory / "Spec_Stage.db"
+    build_demo(staging, force=True)
+
+    database = connect(str(staging), str(directory / "lapus.db"))
+    apply_migrations(database)
+    specs, workflow = SpecService(database), ChangeWorkflow(database)
+
+    document_id = SpecRepository(database).search(SearchQuery(limit=1))[0][0]["document_id"]
+    before = specs.get_section(document_id, 3)["rows"][0]
+    record_id = before["record_id"]
+    staged = before["fields"]["supplier"]["source_value"]
+
+    request = workflow.create_request(actor, document_id, "Survives reparse", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(actor, request_id, 3, record_id, "supplier", "Northline Foil", False, None)
+    workflow.submit(actor, request_id)
+    workflow.approve(actor, request_id, None)
+
+    assert specs.get_section(document_id, 3)["rows"][0]["fields"]["supplier"]["value"] == "Northline Foil"
+
+    database.close()
+    _reparse_document(staging, document_id)
+    database = connect(str(staging), str(directory / "lapus.db"))
+    specs = SpecService(database)
+
+    row = specs.get_section(document_id, 3)["rows"][0]
+    assert row["record_id"] != record_id, "the reparse should have regenerated the row id"
+    field = row["fields"]["supplier"]
+    assert field["value"] == "Northline Foil", "the approved change must survive the rerun"
+    assert field["is_overridden"] is True
+    assert field["source_value"] == staged
+    database.close()
+
+
+def test_overlay_does_not_reattach_when_the_document_changed(
+    tmp_path_factory, actor: Actor
+) -> None:
+    """The fallback must not re-aim an approved change at different content.
+
+    Matching by position alone would do exactly that: if the Word table was
+    edited so a row now holds something else, an approved change would be
+    shown over content nobody approved it against. The captured original value
+    is the guard.
+    """
+    import sys
+
+    from lapus.db.engine import connect
+    from lapus.db.migrations import apply_migrations
+    from lapus.repositories.specs import SearchQuery, SpecRepository
+    from lapus.services.change_workflow import ChangeWorkflow
+    from lapus.services.specs import SpecService
+
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    from make_demo_db import build as build_demo
+
+    directory = tmp_path_factory.mktemp("reparse_changed")
+    staging = directory / "Spec_Stage.db"
+    build_demo(staging, force=True)
+
+    database = connect(str(staging), str(directory / "lapus.db"))
+    apply_migrations(database)
+    specs, workflow = SpecService(database), ChangeWorkflow(database)
+
+    document_id = SpecRepository(database).search(SearchQuery(limit=1))[0][0]["document_id"]
+    record_id = specs.get_section(document_id, 3)["rows"][0]["record_id"]
+
+    request = workflow.create_request(actor, document_id, "Will not reattach", None)
+    request_id = int(request["request_id"])
+    workflow.add_item(actor, request_id, 3, record_id, "supplier", "Northline Foil", False, None)
+    workflow.submit(actor, request_id)
+    workflow.approve(actor, request_id, None)
+    database.close()
+
+    # Reparse, but the Word document now says something different in that cell.
+    connection = sqlite3.connect(staging)
+    columns = (
+        "document_id, source_table_index, source_row, row_type, basis_weight, "
+        "basis_weight_range, caliper_mils, raw_material, supplier, raw_material_item_code"
+    )
+    rows = [
+        list(row) for row in connection.execute(
+            f"SELECT {columns} FROM T03_Bill_of_Materials WHERE document_id = ?", (document_id,)
+        )
+    ]
+    rows[0][9 - 1] = "A Different Supplier Entirely"  # the supplier column
+    connection.execute("DELETE FROM T03_Bill_of_Materials WHERE document_id = ?", (document_id,))
+    connection.executemany(
+        f"INSERT INTO T03_Bill_of_Materials ({columns}) "
+        f"VALUES ({', '.join('?' for _ in columns.split(','))})", rows
+    )
+    connection.commit()
+    connection.close()
+
+    database = connect(str(staging), str(directory / "lapus.db"))
+    field = SpecService(database).get_section(document_id, 3)["rows"][0]["fields"]["supplier"]
+    assert field["is_overridden"] is False, (
+        "an approved change must not reattach to content it was never approved against"
+    )
+    assert field["value"] == "A Different Supplier Entirely"
+    database.close()

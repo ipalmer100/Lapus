@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS lapus.change_item (
     section_number INTEGER NOT NULL CHECK (section_number BETWEEN 1 AND 11),
     target_table TEXT NOT NULL,
     target_record_id BIGINT,
+    -- Where the targeted row sits in the source document. Added in
+    -- schema version 3, and the reason is important: the parser
+    -- DELETEs and reinserts a document's rows on every rerun, so
+    -- target_record_id -- a surrogate key it regenerates -- stops
+    -- resolving and an approved overlay silently goes inert. These two
+    -- describe the row's position in the Word table instead, which
+    -- only moves if the document itself changes. NULL for
+    -- single-record sections, which are keyed on document_id and were
+    -- never affected.
+    target_source_table_index INTEGER,
+    target_source_row INTEGER,
     target_field TEXT NOT NULL,
     original_value TEXT,
     proposed_value TEXT,
@@ -95,5 +106,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_lapus_change_item_doc_target_v2 ON lapus.ch
 
 -- Record the schema version the application expects.
 INSERT INTO lapus.schema_version (version)
-SELECT 2
+SELECT 3
 WHERE NOT EXISTS (SELECT 1 FROM lapus.schema_version);

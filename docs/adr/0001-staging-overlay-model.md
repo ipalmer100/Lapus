@@ -89,6 +89,29 @@ that in the UI rather than hiding it. Closing that loop — writing back to the
 the organisation would decide the database is the system of record. This ADR
 deliberately does not assume that decision has been made.
 
+## Amendment, schema version 3: targeting a row that outlives the parser
+
+The original model targeted a repeating row by its source primary key, `id`,
+as the database contract prescribes. Running a reparse against a live overlay
+showed that this does not hold: the parser deletes and reinserts every row of
+a document on each run, so `id` is regenerated and an overlay keyed on it stops
+resolving. The change item survived; its effect silently did not, which is
+exactly what rule 6 of AGENTS.md forbids.
+
+Change items therefore also record where the targeted row sits in the source
+document (`source_table_index`, `source_row`), which a rerun preserves.
+Matching tries `id` first and falls back to that position.
+
+The fallback is deliberately conservative. It applies only when the staged
+value still equals the `original_value` captured when the change was proposed.
+A reparse that merely regenerated ids leaves the value identical and the
+overlay reattaches; a reparse that genuinely changed the document leaves the
+overlay inert, because showing an approved value over content nobody approved
+it against is worse than showing nothing.
+
+Single-record sections were never affected: they are keyed on `document_id`,
+which the parser preserves.
+
 ## Alternatives considered
 
 **Write into T01-T11 and re-apply after each parser run.** Requires the parser

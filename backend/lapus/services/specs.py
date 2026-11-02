@@ -12,7 +12,7 @@ from ..catalog import load_sections, section_by_number
 from ..db.engine import Database
 from ..repositories.changes import ChangeRepository
 from ..repositories.specs import SearchQuery, SpecRepository
-from .overlay import build_field, index_approved_items, render_section
+from .overlay import build_field, find_override, index_approved_items, render_section
 
 
 class SpecNotFound(RuntimeError):
@@ -125,7 +125,11 @@ class SpecService:
                 "spec_number": row.get("doc_spec_number"),
                 "item": row.get("doc_item"),
                 "fields": {
-                    field: build_field(row.get(field), approved.get((section.table, record_id, field)))
+                    field: build_field(
+                        row.get(field),
+                        find_override(approved, section.table, record_id, field,
+                                      row, row.get(field)),
+                    )
                     for field in fields
                 },
             })

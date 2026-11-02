@@ -140,6 +140,20 @@ python tools/emit_schema_sql.py --dialect postgres
 `backend/tests/test_schema_scripts.py` fails if the checked-in script and the
 code disagree.
 
+**Upgrading an existing schema.** Scripts numbered above `001` are one-time
+upgrades for a `lapus` schema created earlier. They are idempotent, so running
+one twice is harmless:
+
+| Script | What it does | Run it if |
+| --- | --- | --- |
+| `002_upgrade_from_starter_kit.sql` | Adds `clears_value`, removes the foreign keys into `public`, replaces the UNIQUE with partial indexes | Your `lapus` schema came from the original starter kit |
+| `003_add_source_coordinates.sql` | Adds `target_source_table_index` and `target_source_row`, so approved overlays survive a parser rerun | Your schema was created before schema version 3 |
+
+`003` matters more than it sounds. The parser deletes and reinserts every row
+of a document on each run, regenerating the surrogate ids that change items
+point at. Without those two columns an approved change silently stops applying
+after a reparse -- the record survives, its effect does not.
+
 **If `lapus` already exists** in your `Spec_Stage` -- from the original
 starter-kit script, before the schema was generated from the application code
 -- run `db/postgres/002_upgrade_from_starter_kit.sql` instead, once, as an

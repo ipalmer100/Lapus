@@ -19,7 +19,7 @@ from __future__ import annotations
 from .dialect import Dialect
 from .engine import Database, DatabaseError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _statements(dialect: Dialect) -> list[str]:
@@ -69,6 +69,17 @@ def _statements(dialect: Dialect) -> list[str]:
             section_number INTEGER NOT NULL CHECK (section_number BETWEEN 1 AND 11),
             target_table TEXT NOT NULL,
             target_record_id BIGINT,
+            -- Where the targeted row sits in the source document. Added in
+            -- schema version 3, and the reason is important: the parser
+            -- DELETEs and reinserts a document's rows on every rerun, so
+            -- target_record_id -- a surrogate key it regenerates -- stops
+            -- resolving and an approved overlay silently goes inert. These two
+            -- describe the row's position in the Word table instead, which
+            -- only moves if the document itself changes. NULL for
+            -- single-record sections, which are keyed on document_id and were
+            -- never affected.
+            target_source_table_index INTEGER,
+            target_source_row INTEGER,
             target_field TEXT NOT NULL,
             original_value TEXT,
             proposed_value TEXT,
@@ -143,7 +154,21 @@ _REQUIRED_TABLES = ("change_request", "change_item", "change_event", "schema_ver
 # schema is applied by an administrator from a .sql file, and an out-of-date
 # script is otherwise only discovered when a user's first change request fails
 # on an unknown column.
-_REQUIRED_COLUMNS = {"change_item": ("clears_value",)}
+_REQUIRED_COLUMNS = {
+    "change_item": ("clears_value", "target_source_table_index", "target_source_row"),
+}
+
+# Columns added after the first release, with the type to add them as. SQLite
+# has no ADD COLUMN IF NOT EXISTS, and CREATE TABLE IF NOT EXISTS will not
+# alter a table that already exists, so an existing store is brought forward
+# by inspecting its columns and adding what is missing.
+_ADDED_COLUMNS = {
+    "change_item": {
+        "clears_value": "INTEGER NOT NULL DEFAULT 0",
+        "target_source_table_index": "INTEGER",
+        "target_source_row": "INTEGER",
+    },
+}
 
 
 class SchemaNotInstalled(DatabaseError):
@@ -167,12 +192,27 @@ def apply_migrations(database: Database) -> None:
     with database.transaction():
         for statement in _statements(database.dialect):
             database.execute(statement)
+        _add_missing_columns(database)
 
         current = database.scalar("SELECT MAX(version) FROM lapus.schema_version")
         if current is None:
             database.execute(
                 "INSERT INTO lapus.schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
             )
+
+
+def _add_missing_columns(database: Database) -> None:
+    """Bring an existing SQLite store up to the current column set."""
+    for table, columns in _ADDED_COLUMNS.items():
+        present = {
+            str(row["name"]).lower()
+            for row in database.query(f"PRAGMA lapus.table_info({table})")
+        }
+        if not present:
+            continue  # table was just created with every column
+        for column, definition in columns.items():
+            if column.lower() not in present:
+                database.execute(f"ALTER TABLE lapus.{table} ADD COLUMN {column} {definition}")
 
 
 def verify_schema(database: Database) -> None:

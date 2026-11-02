@@ -20,7 +20,7 @@ from ..catalog import UnknownTarget, section_by_number, validate_target
 from ..db.engine import Database, Row
 from ..repositories.changes import ChangeRepository
 from ..repositories.specs import SpecRepository
-from ..services.overlay import current_value
+from ..services.overlay import current_value, source_coordinates
 
 DRAFT = "DRAFT"
 SUBMITTED = "SUBMITTED"
@@ -197,6 +197,12 @@ class ChangeWorkflow:
 
         rows = self._specs.section_rows(document_id, section)
         found, original = current_value(rows, section, target_record_id, target_field)
+        # Where this row sits in the source document. Captured now, because the
+        # parser regenerates the surrogate id on every rerun and without these
+        # the approved overlay would silently stop applying afterwards.
+        source_table_index, source_row = source_coordinates(
+            rows, section, target_record_id
+        )
         if not found:
             raise ValidationError(
                 "That row is no longer in the staged specification. "
@@ -222,6 +228,7 @@ class ChangeWorkflow:
 
         item_id = self._changes.add_item(
             request_id, document_id, section.number, section.table, target_record_id,
+            source_table_index, source_row,
             target_field, None if original is None else str(original),
             proposed_value, clears_value, comment, actor.email,
         )
