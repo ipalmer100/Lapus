@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, type SearchParams } from '../../api/client'
+import { blank } from '../../display'
 import type { SpecSummary } from '../../types'
 
 const PAGE_SIZE = 25
@@ -163,19 +164,26 @@ export function SpecExplorer({ onOpenSpec }: Props) {
                 role="button"
                 onKeyDown={(e) => { if (e.key === 'Enter') onOpenSpec(spec.document_id) }}
               >
-                <td>{spec.customer ?? <span className="muted">Not stated</span>}</td>
+                <td>{blank(spec.customer) ?? <span className="muted">Not stated</span>}</td>
                 <td>
-                  <span className="spec-number">{spec.spec_number ?? spec.filename}</span>
+                  {/* Falls back to the file name so a spec whose number the parser
+                      could not read is still identifiable rather than nameless. */}
+                  <span className="spec-number">
+                    {blank(spec.spec_number) ?? blank(spec.filename)
+                      ?? <span className="muted">Document {spec.document_id}</span>}
+                  </span>
                   {spec.is_present === 0 && (
                     <span className="chip chip-warn" title="The source Word document was not found on the last parser run">
                       source missing
                     </span>
                   )}
                 </td>
-                <td>{spec.item ?? <span className="muted">—</span>}</td>
-                <td className="structure-cell">{spec.structure_description ?? <span className="muted">—</span>}</td>
-                <td>{spec.revision_number ?? '—'}</td>
-                <td>{spec.date_of_issue ?? '—'}</td>
+                <td>{blank(spec.item) ?? <span className="muted">—</span>}</td>
+                <td className="structure-cell">
+                  {blank(spec.structure_description) ?? <span className="muted">—</span>}
+                </td>
+                <td>{blank(spec.revision_number) ?? '—'}</td>
+                <td>{blank(spec.date_of_issue) ?? '—'}</td>
               </tr>
             ))}
           </tbody>

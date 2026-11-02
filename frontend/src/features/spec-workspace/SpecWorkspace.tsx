@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../../api/client'
 import type { ChangeTarget, Section, SpecChangeHistory, SpecDetail } from '../../types'
+import { blank } from '../../display'
 import { SectionView } from './SectionView'
 import { SpecChangeHistoryView } from './SpecChangeHistoryView'
 
@@ -64,13 +65,15 @@ export function SpecWorkspace({ documentId, canPropose, onBack, onPropose, refre
       <header className="spec-header">
         <button type="button" className="link-button back" onClick={onBack}>&larr; All specifications</button>
         <div className="spec-identity">
-          <h1>{h.spec_number ?? h.filename}</h1>
+          <h1>{blank(h.spec_number) ?? blank(h.filename) ?? `Document ${h.document_id}`}</h1>
           <p className="spec-subtitle">
-            {h.customer ?? 'Customer not stated'}
-            {h.item && <> &middot; Item {h.item}</>}
-            {h.revision_number && <> &middot; Revision {h.revision_number}</>}
+            {blank(h.customer) ?? 'Customer not stated'}
+            {blank(h.item) && <> &middot; Item {blank(h.item)}</>}
+            {blank(h.revision_number) && <> &middot; Revision {blank(h.revision_number)}</>}
           </p>
-          {h.structure_description && <p className="spec-structure">{h.structure_description}</p>}
+          {blank(h.structure_description) && (
+            <p className="spec-structure">{blank(h.structure_description)}</p>
+          )}
         </div>
         <div className="spec-badges">
           {h.is_present === 0 && (

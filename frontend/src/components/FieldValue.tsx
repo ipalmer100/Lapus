@@ -11,6 +11,7 @@
 
 import { useState } from 'react'
 import type { FieldValue as FieldValueType } from '../types'
+import { blank } from '../display'
 
 export function humanizeField(field: string): string {
   // Column names are for the database; users read specifications. A handful of
@@ -40,15 +41,14 @@ export function humanizeField(field: string): string {
 }
 
 function displayValue(value: string | null): string {
-  if (value === null || value === '') return '—'
-  return value
+  return blank(value) ?? '—'
 }
 
 export function FieldValue({ field }: { field: FieldValueType }) {
   const [showDetail, setShowDetail] = useState(false)
 
   if (!field.is_overridden) {
-    const empty = field.value === null || field.value === ''
+    const empty = blank(field.value) === null
     return <span className={empty ? 'value value-empty' : 'value'}>{displayValue(field.value)}</span>
   }
 
