@@ -110,3 +110,36 @@ def test_ingestion_errors_survive_having_no_document(database) -> None:
     """A file that failed to parse has no document row; it must still be listed."""
     errors = AdminRepository(database).ingestion_errors()
     assert errors and errors[0]["filename"]
+
+
+def test_specs_with_blank_identity_sort_last(database) -> None:
+    """Specs the parser could not fully read must not open the application.
+
+    An empty string sorts before every real value ('' < 'Alpha'), so ordering
+    by customer alone put the least complete records on page one. Against a
+    real corpus that meant the first screen showed nothing but blank customers
+    and blank spec numbers, which reads as though no spec has either.
+    """
+    from lapus.repositories.changes import ChangeRepository  # noqa: F401
+
+    rows, total = SpecRepository(database).search(SearchQuery(limit=200))
+    assert total > 0
+
+    customers = [(row["customer"] or "").strip() for row in rows]
+    populated = [index for index, value in enumerate(customers) if value]
+    blank = [index for index, value in enumerate(customers) if not value]
+
+    if blank and populated:
+        assert max(populated) < min(blank), (
+            "specs with a blank customer must sort after those with one; "
+            f"got {customers}"
+        )
+
+
+def test_blank_specs_are_still_returned(database) -> None:
+    """Sorting them last must not drop them -- they are still real documents."""
+    repo = SpecRepository(database)
+    _, total = repo.search(SearchQuery(limit=200))
+    assert total == database.scalar(
+        "SELECT COUNT(*) FROM t00_documents WHERE is_present = 1"
+    )

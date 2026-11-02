@@ -76,9 +76,21 @@ class SpecRepository:
 
         # Sorted so results are stable across pages: an unordered LIMIT/OFFSET
         # can repeat or skip rows between requests.
+        #
+        # The leading CASE expressions put specs whose identifying fields the
+        # parser could not read at the *end*. Without them an empty string
+        # sorts before every real value -- '' < 'Alpha' on both backends -- so
+        # a plain ORDER BY customer opened the application on nothing but its
+        # least complete records, which reads as though no spec has a customer
+        # at all. A CASE rather than NULLS LAST because the blanks are empty
+        # strings, not NULLs, and because this phrasing is identical on SQLite,
+        # PostgreSQL and SQL Server.
         rows = self._db.query(
             f"{_SPEC_LIST_SELECT}{clause} "
-            "ORDER BY p.customer, p.spec_number, d.filename, d.id "
+            "ORDER BY CASE WHEN COALESCE(p.customer, '') = '' THEN 1 ELSE 0 END, "
+            "         p.customer, "
+            "         CASE WHEN COALESCE(p.spec_number, '') = '' THEN 1 ELSE 0 END, "
+            "         p.spec_number, d.filename, d.id "
             "LIMIT ? OFFSET ?",
             [*params, max(1, min(query.limit, 200)), max(0, query.offset)],
         )
